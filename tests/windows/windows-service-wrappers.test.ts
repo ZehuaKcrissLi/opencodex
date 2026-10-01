@@ -172,6 +172,58 @@ test("stay-out exit code is opt-in for new wrappers, preserving legacy services"
   for (const branch of branches) expect(branch[1]).toContain("serviceStayOutExitCode()");
 });
 
+describe("generated wrapper keeps % expansions out of parentheses (#6290)", () => {
+  test("no percent variable appears inside a parenthesized block", async () => {
+    const { buildWindowsServiceScript } = await import("../../src/service/windows-taskxml");
+    for (const cli of ["C:\\ocx\\cli.ts", null]) {
+      const batch = buildWindowsServiceScript({ bun: "C:\\ocx\\bun.exe", bunRuntimeSource: "bundled", cli }, 10100, []);
+      // cmd percent-expands variables while PARSING a `( ... )` block, before the
+      // line's condition is tested. A value containing ")" — a ko-KR/ja-JP %DATE%
+      // like "2026-09-30(수)", or a path under "Program Files (x86)" — closes the
+      // block early and the parse error aborts the whole batch before the child
+      // launch line, so the proxy silently never starts on logon.
+      let depth = 0;
+      const offenders: string[] = [];
+      for (let index = 0; index < batch.length; index += 1) {
+        const char = batch[index];
+        if (char === "(") depth += 1;
+        else if (char === ")") depth -= 1;
+        else if (char === "%" && depth > 0) offenders.push(batch.slice(Math.max(0, index - 40), index + 1));
+      }
+      expect(depth).toBe(0);
+      expect(offenders).toEqual([]);
+    }
+  });
+
+  test.skipIf(process.platform !== "win32")("cmd runs the wrapper to a clean exit under a ko-KR-style %DATE%", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { spawnSync } = await import("node:child_process");
+    const { buildWindowsServiceScript } = await import("../../src/service/windows-taskxml");
+    const dir = mkdtempSync(join(tmpdir(), "ocx-wrapper-date-"));
+    try {
+      const log = join(dir, "service.log");
+      const batch = buildWindowsServiceScript({ bun: join(dir, "bun.exe"), bunRuntimeSource: "bundled", cli: null }, 10100, [])
+        .replace(/set "OCX_SERVICE_LOG=[^"]*"/, `set "OCX_SERVICE_LOG=${log}"`);
+      // Shadow %DATE% the way a ko-KR/ja-JP system produces it; the hangul must
+      // arrive as real bytes, so the harness is UTF-8 and switches to chcp 65001 —
+      // the same shape the generated wrapper itself uses.
+      const harness = join(dir, "run.cmd");
+      writeFileSync(harness, `@echo off\r\nchcp 65001 >nul\r\nset "DATE=2026-09-30(수)"\r\n${batch}`);
+      const result = spawnSync("cmd.exe", ["/d", "/c", harness], { timeout: 15000 });
+      expect(result.error).toBeUndefined();
+      // The old script died mid-block ("...] was unexpected at this time") long
+      // before any branch ran. A working wrapper reaches :missing_bun, logs the
+      // timestamped message, and exits 3.
+      expect(result.status).toBe(3);
+      expect(readFileSync(log, "utf8")).toContain("installation is incomplete: bundled Bun is missing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+
 test.skipIf(process.platform !== "win32")("cmd restarts zero/crash exits and stops on explicit stay-out", async () => {
   const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

@@ -2,7 +2,7 @@ import { WINDOWS_WRAPPER_PROTOCOL_ENV, WINDOWS_WRAPPER_STAY_OUT_EXIT_CODE } from
 import { readFileSync } from "node:fs";
 import { TASK, windowsServiceScriptPath, windowsLauncherVbsPath, windowsTaskXmlPath } from "./state";
 import { windowsWscript } from "./windows-scheduler";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { BUN_RUNTIME_PATH_ENV, BUN_RUNTIME_SOURCE_ENV } from "../lib/bun-runtime";
 import { serviceApiTokenFilePath } from "../lib/service-secrets";
 import { windowsEnvIndirectBatchPathList, windowsEnvIndirectBatchValue } from "../lib/win-paths";
@@ -85,11 +85,18 @@ export function buildWindowsServiceScript(
     windowsBatchSet("OCX_CLI", cli ?? undefined, "path"),
     // Standalone executables have no npm package tree; recovery is "replace the executable", so no OCX_PKG_DIR/restore_backup wiring.
     // Package root for the transactional-update restore path (#1942): cli is
-    // <pkg>\src\cli\index.ts, so the package dir is three levels up.
-    cli ? 'for %%I in ("%OCX_CLI%\\..\\..\\..") do set "OCX_PKG_DIR=%%~fI"' : null,
-    'if exist "%OCX_API_TOKEN_FILE%" (',
-    '  set /p OPENCODEX_API_AUTH_TOKEN=<"%OCX_API_TOKEN_FILE%"',
-    ")",
+    // <pkg>\src\cli\index.ts, so the package dir is three levels up. Resolved here,
+    // not in the wrapper: a `for %%I` would put %OCX_CLI% inside parentheses, and
+    // cmd percent-expands variables while PARSING a block — before the line's
+    // condition is even tested. A value containing ")" closes the block early and
+    // aborts the whole batch, which is exactly what a ko-KR/ja-JP %DATE% like
+    // "2026-09-30(수)" did to every timestamped echo inside the old blocks (#6290):
+    // the wrapper died before launching bun on every logon, silently, with the
+    // scheduler's Last Run Result still 0. The wrapper therefore keeps every
+    // %VAR% expansion out of parentheses: checks go through `goto` labels and the
+    // per-backup restore work is a `call`ed subroutine.
+    cli ? windowsBatchSet("OCX_PKG_DIR", win32.dirname(win32.dirname(win32.dirname(cli))), "path") : null,
+    'if exist "%OCX_API_TOKEN_FILE%" set /p OPENCODEX_API_AUTH_TOKEN=<"%OCX_API_TOKEN_FILE%"',
     ":loop",
     '>>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] opencodex service wrapper start',
     '>>"%OCX_SERVICE_LOG%" echo bun="%OCX_BUN%"',
@@ -98,20 +105,10 @@ export function buildWindowsServiceScript(
     '>>"%OCX_SERVICE_LOG%" echo opencodex_home="%OPENCODEX_HOME%"',
     '>>"%OCX_SERVICE_LOG%" echo codex_home="%CODEX_HOME%"',
     '>>"%OCX_SERVICE_LOG%" echo token_file="%OCX_API_TOKEN_FILE%"',
-    'if not exist "%OCX_BUN%" (',
-    "  call :restore_backup",
-    ")",
-    'if not exist "%OCX_BUN%" (',
-    '  >>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] installation is incomplete: bundled Bun is missing; reinstall opencodex, then run ocx service repair',
-    "  exit /b 3",
-    ")",
-    cli ? 'if not exist "%OCX_CLI%" (' : null,
-    cli ? "  call :restore_backup" : null,
-    cli ? ")" : null,
-    cli ? 'if not exist "%OCX_CLI%" (' : null,
-    cli ? '  >>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] installation is incomplete: CLI entry is missing; reinstall opencodex, then run ocx service repair' : null,
-    cli ? "  exit /b 3" : null,
-    cli ? ")" : null,
+    'if not exist "%OCX_BUN%" call :restore_backup',
+    'if not exist "%OCX_BUN%" goto missing_bun',
+    cli ? 'if not exist "%OCX_CLI%" call :restore_backup' : null,
+    cli ? 'if not exist "%OCX_CLI%" goto missing_cli' : null,
     cli ? `"%OCX_BUN%" "%OCX_CLI%" start --port ${port} >>"%OCX_SERVICE_LOG%" 2>&1` : `"%OCX_BUN%" start --port ${port} >>"%OCX_SERVICE_LOG%" 2>&1`,
     // Stop commands kill the wrapper; a zero child exit alone is not a stop request.
     `if "%ERRORLEVEL%"=="${WINDOWS_WRAPPER_STAY_OUT_EXIT_CODE}" goto stopped`,
@@ -128,20 +125,38 @@ export function buildWindowsServiceScript(
     // a sibling .ocx-backup-* holding the previous version. This wrapper lives OUTSIDE
     // the package tree, so it can restore when the launcher itself is gone — the exact
     // window the in-launcher boot probe cannot reach.
+    //
+    // The listing runs from inside the package's parent directory (pushd) so the `for /f`
+    // in-clause carries only a literal glob: %OCX_PKG_DIR% inside `( ... )` would reopen
+    // the #6290 parse hole for any install path holding a ")". That is also why the
+    // per-backup work is a `call`ed subroutine rather than a parenthesized body.
     ":restore_backup",
     '>>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] install incomplete - looking for a transactional-update backup to restore',
-    'for /f "delims=" %%B in (\'dir /b /ad /o-n "%OCX_PKG_DIR%\\..\\.ocx-backup-*" 2^>nul\') do (',
-    '  if exist "%OCX_PKG_DIR%\\..\\%%B\\opencodex\\package.json" (',
-    '    if exist "%OCX_PKG_DIR%" rmdir /s /q "%OCX_PKG_DIR%" 2>nul',
-    '    move "%OCX_PKG_DIR%\\..\\%%B\\opencodex" "%OCX_PKG_DIR%" >nul 2>&1',
-    '    if exist "%OCX_PKG_DIR%\\package.json" (',
-    '      >>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] restored previous install from %%B',
-    "      goto :eof",
-    "    )",
-    "  )",
-    ")",
-    '>>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] no restorable backup found',
+    'set "OCX_RESTORED="',
+    'pushd "%OCX_PKG_DIR%\\.." 2>nul',
+    "if errorlevel 1 goto restore_done",
+    'for /f "delims=" %%B in (\'dir /b /ad /o-n ".ocx-backup-*" 2^>nul\') do call :try_restore "%%B"',
+    "popd",
+    ":restore_done",
+    'if not defined OCX_RESTORED >>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] no restorable backup found',
     "goto :eof",
+    "",
+    ":try_restore",
+    "if defined OCX_RESTORED goto :eof",
+    'if not exist "%~1\\opencodex\\package.json" goto :eof',
+    'if exist "%OCX_PKG_DIR%" rmdir /s /q "%OCX_PKG_DIR%" 2>nul',
+    'move "%~1\\opencodex" "%OCX_PKG_DIR%" >nul 2>&1',
+    'if not exist "%OCX_PKG_DIR%\\package.json" goto :eof',
+    '>>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] restored previous install from %~1',
+    'set "OCX_RESTORED=1"',
+    "goto :eof",
+    "",
+    ":missing_bun",
+    '>>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] installation is incomplete: bundled Bun is missing; reinstall opencodex, then run ocx service repair',
+    "exit /b 3",
+    cli ? ":missing_cli" : null,
+    cli ? '>>"%OCX_SERVICE_LOG%" echo [%DATE% %TIME%] installation is incomplete: CLI entry is missing; reinstall opencodex, then run ocx service repair' : null,
+    cli ? "exit /b 3" : null,
   ].filter((line): line is string => Boolean(line));
   return `${lines.join("\r\n")}\r\n`;
 }
