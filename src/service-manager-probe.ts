@@ -582,7 +582,7 @@ function matchesGeneratedStandaloneControlFlow(body: string, port: number): bool
   const expected = scriptLines(buildWindowsServiceScript({
     bun: "C:\\OpenCodex\\ocx.exe", bunRuntimeSource: "standalone", cli: null,
   }, port, []));
-  const tokenBlock = 'if exist "%OCX_API_TOKEN_FILE%" (';
+  const tokenBlock = 'if exist "%OCX_API_TOKEN_FILE%" set /p OPENCODEX_API_AUTH_TOKEN=<"%OCX_API_TOKEN_FILE%"';
   const boundary = lines.indexOf(tokenBlock);
   const expectedBoundary = expected.indexOf(tokenBlock);
   if (boundary < 0 || expectedBoundary < 0) return false;
