@@ -28,7 +28,7 @@ export function useAddProviderOAuth({
   apiBase: string;
   t: TFn;
   aliveRef: React.MutableRefObject<boolean>;
-  onAdded: (name: string) => void;
+  onAdded: (name: string) => void | Promise<void>;
 }) {
   const loginGenerationRef = useRef(new Map<string, number>());
   const activeProvidersRef = useRef(new Map<string, OAuthLoginSetters>());
@@ -139,7 +139,7 @@ export function useAddProviderOAuth({
         if (s?.loggedIn) {
           activeProvidersRef.current.delete(providerId);
           setOauthMsg("");
-          onAdded(providerId);
+          await onAdded(providerId);
           return;
         }
         const hint = s?.hint;

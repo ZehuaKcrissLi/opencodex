@@ -73,6 +73,7 @@ export async function executeResponsesSidecars(
     | "anthropicSessionKey"
     | "commitResolvedOAuthSelection"
     | "resolveSelectionAdapter"
+    | "resolveCopilotSelection"
     | "oauthDispatch"
     | "noteRoutedAttemptSend"
     | "bindKeyUsageFromBridge"
@@ -93,6 +94,7 @@ export async function executeResponsesSidecars(
     anthropicSessionKey,
     commitResolvedOAuthSelection,
     resolveSelectionAdapter,
+    resolveCopilotSelection,
     oauthDispatch,
   } = transportState;
   const {
@@ -214,6 +216,7 @@ export async function executeResponsesSidecars(
       }) : null;
     if (rotated) {
       route.provider = rotated;
+      await resolveCopilotSelection(retryParsed ?? parsed);
     } else if (
       // A POSITIVE gate, not an early return. An early `return null` here made every later arm
       // unreachable: Anthropic never has a genericFailoverAccountId (isGenericFailoverProvider

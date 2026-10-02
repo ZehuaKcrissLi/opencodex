@@ -1034,6 +1034,7 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   contextWindow: "editor",
   modelContextWindows: "editor",
   modelContextTiers: "editor",
+  copilotModelSelection: "editor",
   modelInputModalities: "editor",
   modelCapabilities: "editor",
   modelMaxInputTokens: "runtime",

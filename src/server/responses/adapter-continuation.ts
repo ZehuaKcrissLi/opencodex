@@ -83,6 +83,7 @@ export function createAdapterContinuations(
     | "oauthDispatch"
     | "invalidateSameTargetRequest"
     | "resolveSelectionAdapter"
+    | "resolveCopilotSelection"
     | "anthropicRouteDecision"
     | "anthropicPoolAccountId"
     | "anthropicPoolFailovers"
@@ -366,6 +367,12 @@ export function createAdapterContinuations(
         if (rotated) {
           try { void response.body?.cancel().catch(() => {}); } catch { /* already closed */ }
           route.provider = rotated;
+          try { await transportState.resolveCopilotSelection(nextParsed); }
+          catch (error) {
+            yield { type: "error", message: `Provider continuation failed: ${redactSecretString(error instanceof Error ? error.message : String(error))}`,
+              ...(options.abortSignal?.aborted || upstream.signal.aborted ? { status: 499 } : {}) };
+            return;
+          }
           invalidateSameTargetRequest();
           transportState.activeAdapter = resolveSelectionAdapter(
             resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire, route.staticPolicy),

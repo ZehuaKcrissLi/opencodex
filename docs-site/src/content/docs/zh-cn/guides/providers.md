@@ -92,7 +92,7 @@ ocx login cursor       # 独立的 Cursor PKCE 登录
 ocx login command-code # Command Code 浏览器 OAuth（或导入 ~/.commandcode/auth.json）
 ocx login orcarouter-oauth # OrcaRouter 浏览器授权 + PKCE
 ocx login devin       # Cognition/Devin：优先导入 Devin CLI 凭据，否则走 Auth0 浏览器登录
-ocx login github-copilot  # GitHub 设备流 → Copilot 令牌（Copilot Pro/Business）
+ocx login github-copilot  # GitHub 设备流 → Copilot 令牌（Copilot account）
 ocx login codex        # Codex 账号池（别名：chatgpt、openai；需要代理正在运行）
 ocx logout <provider>
 ```
@@ -475,6 +475,12 @@ GPT-5.6 Sol/Terra/Luna 会预置在提供商的回退列表中，因此即使实
 登录后换取短期 Copilot API 令牌，需要有效的 Copilot 订阅，GitHub 政策收紧时可能失效）；GitLab Duo
 使用 Bearer **订阅令牌**（而非普通 API 密钥）进行认证。
 **Cloudflare AI Gateway** 需要将 account 和 gateway id 填入 URL。
+
+Student 或 Free 账户请在 **Providers → GitHub Copilot → Settings → 模型选择** 中选择
+**Student / Free（仅 Auto）**。模型列表展示 `github-copilot/auto`，实际模型由 GitHub 为每次请求选择。
+默认“根据账户权限自动判断”使用账户权限信息；“其他套餐（手动选择）”保留具名模型选择。
+该设置不会扩大订阅权限；切回手动模式后会恢复已保存的手动模型偏好。
+CLI：`ocx provider edit github-copilot --copilot-model-selection auto`。
 
 Copilot 提供混合 wire 目录：其模型（`gpt-5.3-codex`、`gpt-5.4`、
 `gpt-5.4-mini`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker`）会拒绝面向

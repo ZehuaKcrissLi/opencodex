@@ -130,6 +130,7 @@ export async function prepareAdapterExchange(
     | "replayOAuthCredentialSnapshot"
     | "invalidateSameTargetRequest"
     | "resolveSelectionAdapter"
+    | "resolveCopilotSelection"
     | "anthropicRouteDecision"
     | "anthropicPoolAccountId"
     | "anthropicPoolFailovers"
@@ -164,6 +165,7 @@ export async function prepareAdapterExchange(
     refreshResolvedOAuthSelection,
     invalidateSameTargetRequest,
     resolveSelectionAdapter,
+    resolveCopilotSelection,
     anthropicSessionKey,
     commitResolvedOAuthSelection,
     applyFailoverSnapshot,
@@ -822,6 +824,7 @@ export async function prepareAdapterExchange(
         // until runtime cleanup (one per rotated key).
         try { void upstreamResponse.body?.cancel().catch(() => {}); } catch { /* already consumed/closed */ }
         route.provider = rotated;
+        await resolveCopilotSelection(parsed);
         invalidateSameTargetRequest();
         transportState.activeAdapter = resolveSelectionAdapter(
           resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire, route.staticPolicy),
@@ -968,6 +971,7 @@ export async function prepareAdapterExchange(
         // until runtime cleanup (one per rotated key under a rate-limit storm).
         try { void upstreamResponse.body?.cancel().catch(() => {}); } catch { /* already consumed/closed */ }
         route.provider = rotated;
+        await resolveCopilotSelection(parsed);
         invalidateSameTargetRequest();
         transportState.activeAdapter = resolveSelectionAdapter(
           resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire, route.staticPolicy),

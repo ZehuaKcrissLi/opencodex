@@ -293,8 +293,10 @@ export function filterCatalogVisibleModels(
     }
   }
   return models.filter(m => {
-    if (initialModelSelectionPending(config.providers[m.provider])) return false;
     if (config.providers[m.provider]?.disabled === true) return false;
+    if (m.provider === "github-copilot" && m.id === "auto")
+      return ![...disabled].some(stored => slugEquals(stored, m.provider, m.id));
+    if (initialModelSelectionPending(config.providers[m.provider])) return false;
     const nativeAlias = m.provider === COMBO_NAMESPACE && m.nativeAlias === true;
     // disabledModels may be stored raw (canonical) or encoded (legacy UI writes).
     for (const stored of disabled) {

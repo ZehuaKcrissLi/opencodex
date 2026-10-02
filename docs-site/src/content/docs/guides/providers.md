@@ -190,7 +190,7 @@ ocx login zed          # Zed native-app callback login (experimental)
 ocx login command-code # Command Code browser OAuth (or import ~/.commandcode/auth.json)
 ocx login orcarouter-oauth # OrcaRouter browser consent + PKCE
 ocx login devin       # Cognition/Devin: import Devin CLI credential, else Auth0 browser sign-in
-ocx login github-copilot  # GitHub device flow → Copilot token (Copilot Pro/Business)
+ocx login github-copilot  # GitHub device flow → Copilot token (Copilot account)
 ocx login codex        # Codex account pool (aliases: chatgpt, openai; needs a running proxy)
 ocx logout <provider>
 ```
@@ -1261,6 +1261,14 @@ not exempt the target. Scheme-specific HTTP(S) proxy variables retain their sepa
 device-flow login for a short-lived Copilot API token — not a pasted API key. **GitLab Duo** remains
 a key/subscription-token gateway on its OpenAI-compatible endpoint. **Cloudflare AI
 Gateway** needs your account + gateway ids filled into the URL.
+
+For Copilot Student or Free accounts, choose **Providers → GitHub Copilot → Settings →
+Model selection → Student / Free (Auto only)**. The picker exposes `github-copilot/auto`;
+GitHub selects the actual model for each request. The default **Account permissions
+(automatic)** mode uses account evidence; **Other plans (manual selection)** preserves
+named-model selection. This setting controls model selection and does not change subscription
+permissions. Stored manual model preferences return when you switch back to manual mode.
+CLI: `ocx provider edit github-copilot --copilot-model-selection auto`.
 
 Copilot fronts a mixed-wire catalog: the following models (`gpt-5.3-codex`, `gpt-5.4`,
 `gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker`) reject

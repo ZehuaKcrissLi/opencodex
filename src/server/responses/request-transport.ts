@@ -56,6 +56,9 @@ import { classifyModelFamilyForQuota } from "../../oauth/account-quota-rank";
 import { expandInferenceOAuthSendBudget } from "../inference/context";
 import { stampOAuthAccountLabel, usesApiKeyAccount } from "../../providers/label";
 import { resolveProviderTransport } from "../../providers/xai-transport";
+import { captureRouteStaticPolicy } from "../../router";
+import { resolveCopilotAuto } from "../../providers/github-copilot-auto";
+import { renameRoutedIdentityInContext } from "../../adapters/identity";
 import { resolveCopilotApiBaseUrl } from "../../oauth/github-copilot";
 import {
   providerApiKeySelectionIsCurrent,
@@ -242,6 +245,29 @@ export async function prepareResponsesTransport(
    * the case the fence exists for. Stays 0 for every provider without a passive quota.
    */
   let passiveQuotaWriterGeneration = 0;
+  const copilotRequestedModel = route.modelId;
+  let copilotAutoAdapter: OcxProviderConfig["adapter"] | undefined;
+  const resolveCopilotSelection = async (requestParsed: OcxParsedRequest): Promise<void> => {
+    if (route.providerName !== "github-copilot" || route.provider.authMode === "forward") return;
+    const binding: DispatchBinding | undefined = oauthSelection && servingOAuthSnapshot
+      ? { kind: "oauth", selection: { ...oauthSelection }, snapshot: servingOAuthSnapshot }
+      : { kind: "api-key", provider: { ...route.provider } };
+    const selected = await resolveCopilotAuto(route.provider, copilotRequestedModel, requestParsed,
+      options.abortSignal ?? req.signal, () => selectionIsCurrent(binding));
+    route.provider = selected.provider;
+    route.modelId = selected.modelId;
+    route.staticPolicy = captureRouteStaticPolicy(route.providerName, route.modelId, route.provider,
+      route.staticPolicy.effectiveAlias, inboundWire);
+    copilotAutoAdapter = selected.auto ? selected.provider.adapter : undefined;
+    for (const target of new Set([parsed, requestParsed])) {
+      target.modelId = selected.modelId;
+      if (target._rawBody && typeof target._rawBody === "object")
+        (target._rawBody as { model?: string }).model = selected.modelId;
+      target.context = renameRoutedIdentityInContext(target.context, selected.modelId);
+    }
+    logCtx.model = selected.modelId;
+    if (logCtx.activeAttempt) logCtx.activeAttempt.model = selected.modelId;
+  };
   /**
    * Apply a rotated account's FULL credential snapshot to the live route (#2568d).
    *
@@ -301,6 +327,7 @@ export async function prepareResponsesTransport(
     }
     if (snapshot.projectId) rotatedProvider = { ...rotatedProvider, project: snapshot.projectId };
     route.provider = rotatedProvider;
+    await resolveCopilotSelection(retryParsed);
     if (route.providerName === "kiro") {
       const kiroContext = { ...(snapshot.kiro ?? {}) };
       // Terminal-guard continuations are rebuilt from a shallow clone. Updating only the
@@ -365,6 +392,7 @@ export async function prepareResponsesTransport(
       && credentialGeneration(row.credential) === binding.snapshot.generation;
   };
   const resolveSelectionAdapter = (provider: OcxProviderConfig, retention = config.cacheRetention): ProviderAdapter => {
+    if (copilotAutoAdapter) provider = { ...provider, adapter: copilotAutoAdapter };
     const resolved = resolveAdapter(provider, retention, route.providerName);
     if (route.provider.authMode === "forward") return resolved;
     const binding: DispatchBinding | undefined = route.provider.authMode === "oauth"
@@ -439,6 +467,7 @@ export async function prepareResponsesTransport(
       const current = resolveCurrentProviderApiKeyTransport(config, route.providerName, route.provider);
       if (!current) throw new Error("API key selection is unavailable before dispatch");
       route.provider = current;
+      await resolveCopilotSelection(requestParsed);
     }
     adapter = activeAdapter = runTurnAdapter = resolveSelectionAdapter(
       resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire, route.staticPolicy),
@@ -798,7 +827,13 @@ export async function prepareResponsesTransport(
       ? resolveCopilotApiBaseUrl(sentOAuthSnapshot?.apiBaseUrl)
       : undefined,
   );
+  try { await resolveCopilotSelection(parsed); }
+  catch (error) {
+    if ((options.abortSignal ?? req.signal).aborted) return clientCancelledResponse();
+    return formatErrorResponse(502, "provider_error", "GitHub Copilot Auto negotiation failed; retry or check your Copilot account permissions.");
+  }
   let adapterProvider = resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire, route.staticPolicy);
+  if (copilotAutoAdapter) adapterProvider = { ...adapterProvider, adapter: copilotAutoAdapter };
   const stripClaudeMainAuth = options.stripClaudeMainAuthForNoncanonicalForward === true
     && !isCanonicalOpenAiForwardProvider(adapterProvider)
     && ((adapterProvider.adapter === "openai-responses" && adapterProvider.authMode === "forward")
@@ -985,6 +1020,7 @@ export async function prepareResponsesTransport(
     applyFailoverSnapshot,
     selectionIsCurrent,
     resolveSelectionAdapter,
+    resolveCopilotSelection,
     refreshRunTurnAdapter,
     oauthDispatch,
     noteRoutedAttemptSend,

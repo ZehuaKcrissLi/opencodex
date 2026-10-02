@@ -7,6 +7,7 @@ export interface ProviderPayloadForm {
   apiKey: string;
   apiKeyTransport?: "x-api-key" | "bearer";
   defaultModel: string;
+  copilotModelSelection?: "detect" | "auto" | "manual";
   allowPrivateNetwork?: boolean;
 }
 
@@ -75,6 +76,7 @@ export interface ProviderPayload {
   apiKey?: string;
   apiKeyTransport?: "x-api-key" | "bearer";
   defaultModel?: string;
+  copilotModelSelection?: "detect" | "auto" | "manual";
   authMode?: "key" | "forward" | "oauth";
   codexAccountMode?: "pool" | "direct";
   allowPrivateNetwork?: boolean;
@@ -97,6 +99,9 @@ export function buildProviderPayload(form: ProviderPayloadForm): ProviderPayload
   }
   if (form.adapter.trim() === "anthropic" && form.authMode === "key" && form.apiKeyTransport === "bearer") {
     provider.apiKeyTransport = "bearer";
+  }
+  if (form.name.trim() === "github-copilot" && form.copilotModelSelection !== undefined) {
+    provider.copilotModelSelection = form.copilotModelSelection;
   }
   if (form.defaultModel.trim()) {
     provider.defaultModel = form.defaultModel.trim();

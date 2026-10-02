@@ -1,3 +1,4 @@
+import { CopilotModelSelection } from "./CopilotModelSelection";
 import { readUsageResponseJson, usageSummary30dResourceKey, type UsageReadMetadata } from "../usage-summary-resource";
 import { UsageIncompleteNotice } from "./usage-incomplete-notice";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -222,7 +223,16 @@ export default function AddProviderModal({
     cancelLoginOAuth,
     loginOAuth,
     submitManualCode: submitManualCodeApi,
-  } = useAddProviderOAuth({ apiBase, t, aliveRef, onAdded });
+  } = useAddProviderOAuth({ apiBase, t, aliveRef, onAdded: async name => {
+    if (name === "github-copilot" && form?.copilotModelSelection !== undefined) {
+      const result = await fetch(`${apiBase}/api/providers?name=github-copilot`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copilotModelSelection: form.copilotModelSelection }),
+      });
+      if (!result.ok) throw new Error(t("prov.saveFailed"));
+    }
+    onAdded(name);
+  } });
 
   const oauthSetters = {
     setOauthBusy: (busy: boolean) => dispatch({ type: "set-oauth-busy", busy }),
@@ -302,6 +312,12 @@ export default function AddProviderModal({
           />
         ) : form && (
           preset.auth === "oauth" && form.authMode === "oauth" ? (
+            <>
+            {preset.id === "github-copilot" && <CopilotModelSelection
+              value={form.copilotModelSelection ?? "detect"}
+              onChange={value => dispatch({ type: "set-form", form: { ...form, copilotModelSelection: value } })}
+              disabled={oauthBusy}
+            />}
             <AddProviderOAuthPane
               preset={preset}
               oauthSupported={oauthSupported}
@@ -329,6 +345,7 @@ export default function AddProviderModal({
                 dispatch({ type: "back" });
               }}
             />
+            </>
           ) : (
             <AddProviderFormPane
               preset={preset}
