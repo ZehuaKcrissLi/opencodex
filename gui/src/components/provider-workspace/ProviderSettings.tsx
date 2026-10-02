@@ -383,6 +383,9 @@ export default function ProviderSettings({
         <span className="pwi-settings-label"><IconLock style={{ width: 12, height: 12 }} /> {t("pws.providerId")}</span>
         <input className="input" value={item.name} readOnly disabled />
       </label>
+      {item.name === "github-copilot" && (
+        <CopilotModelSelection value={copilotModelSelection} onChange={setCopilotModelSelection} disabled={saving} />
+      )}
       <label className="pwi-settings-field">
         <span className="pwi-settings-label">{t("modal.adapter")}</span>
         {isPreset ? <input className="input" value={adapter} readOnly disabled /> : (
@@ -442,9 +445,6 @@ export default function ProviderSettings({
           </select>
           <span className="pwi-settings-hint">{t("pws.cursorTransportDesc")}</span>
         </label>
-      )}
-      {item.name === "github-copilot" && (
-        <CopilotModelSelection value={copilotModelSelection} onChange={setCopilotModelSelection} disabled={saving} />
       )}
       <label className="pwi-settings-field">
         <span className="pwi-settings-label">{t("pws.cell.defaultModel")}</span>

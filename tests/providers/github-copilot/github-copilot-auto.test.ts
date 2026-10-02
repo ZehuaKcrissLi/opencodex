@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { clearCopilotAutoModelsForTests, copilotPickerModels, copilotRequiresAuto, resolveCopilotAuto } from "../../../src/providers/github-copilot-auto";
+import { waitForProviderRequestSlot, releaseProviderRequestSlot } from "../../../src/providers/request-pacing";
+import { redactHeaders, redactSecrets, redactSecretString } from "../../../src/lib/redact";
 import type { OcxParsedRequest, OcxProviderConfig } from "../../../src/types";
 
 const parsed: OcxParsedRequest = { modelId: "auto", stream: true, options: {}, context: {
@@ -7,6 +9,45 @@ const parsed: OcxParsedRequest = { modelId: "auto", stream: true, options: {}, c
 } };
 beforeEach(clearCopilotAutoModelsForTests);
 describe("Copilot Auto permissions and negotiation", () => {
+  test("initial negotiation honors the provider concurrency cap", async () => {
+    let sends = 0;
+    const provider = { authMode: "oauth", baseUrl: "https://api.githubcopilot.com",
+      requestPacing: { enabled: true, maxConcurrentRequests: 1 }, fetch: (async () => {
+        sends++; return Response.json({ data: [{ id: "named", model_picker_enabled: true }] });
+      }) as typeof fetch } as OcxProviderConfig;
+    const held = await waitForProviderRequestSlot("github-copilot", provider, "named");
+    const pending = resolveCopilotAuto(provider, "named", parsed);
+    try { await Bun.sleep(10); expect(sends).toBe(0); }
+    finally { releaseProviderRequestSlot(held); }
+    expect((await pending).modelId).toBe("named");
+    expect(sends).toBe(1);
+  });
+  test("a redirect cannot forward negotiation credentials to its Location", async () => {
+    const calls: string[] = [];
+    const provider = { authMode: "oauth", apiKey: "opaque-bearer", baseUrl: "https://api.githubcopilot.com", fetch: (async url => {
+      calls.push(String(url));
+      return new Response(null, { status: 302, headers: { location: "https://untrusted.invalid/collect" } });
+    }) as typeof fetch } as OcxProviderConfig;
+    await expect(resolveCopilotAuto(provider, "auto", parsed)).rejects.toThrow("failed (302)");
+    expect(calls).toEqual(["https://api.githubcopilot.com/models"]);
+  });
+  test("session credentials are redacted in headers, JSON fields, and provider echoes", () => {
+    const secret = "opaque-session-value";
+    expect(redactHeaders({ "Copilot-Session-Token": secret })).toEqual({ "copilot-session-token": "[REDACTED]" });
+    expect(redactSecrets({ session_token: secret })).toEqual({ session_token: "[REDACTED]" });
+    for (const echo of [`Copilot-Session-Token: ${secret}`, `session_token=${secret}`, JSON.stringify({ session_token: secret })])
+      expect(redactSecretString(echo)).not.toContain(secret);
+  });
+  test("expired session is rejected before sending the intent or any inference", async () => {
+    let intentSent = false;
+    const provider = { authMode: "oauth", baseUrl: "https://api.githubcopilot.com", fetch: (async url => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "eligible", supported_endpoints: ["/responses"] }] });
+      if (String(url).endsWith("/intent")) intentSent = true;
+      return Response.json({ session_token: "expired-session", expires_at: Math.floor(Date.now() / 1000) - 1, available_models: ["eligible"] });
+    }) as typeof fetch } as OcxProviderConfig;
+    await expect(resolveCopilotAuto(provider, "auto", parsed)).rejects.toThrow("session is already expired");
+    expect(intentSent).toBe(false);
+  });
   test("inventory existence does not grant picker permission; missing metadata retains legacy", () => {
     expect(copilotRequiresAuto({}, [{ id: "gpt-4.1", model_picker_enabled: false }])).toBe(true);
     expect(copilotRequiresAuto({}, [{ id: "gpt-4.1" }])).toBe(false);
@@ -63,6 +104,27 @@ describe("Copilot Auto permissions and negotiation", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).not.toContain("private-session-material");
     expect(error.message).toBe("GitHub Copilot Auto session omitted its routing credentials");
+  });
+  test("transport exceptions cannot expose reflected session headers", async () => {
+    const secret = "reflected-session-value";
+    const provider = { authMode: "oauth", baseUrl: "https://api.githubcopilot.com", fetch: (async url => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "eligible", supported_endpoints: ["/responses"] }] });
+      if (String(url).endsWith("/models/session")) return Response.json({ session_token: secret, available_models: ["eligible"] });
+      throw new Error(secret);
+    }) as typeof fetch } as OcxProviderConfig;
+    const error = await resolveCopilotAuto(provider, "auto", parsed).catch(error => error as Error);
+    expect(error.message).not.toContain(secret);
+    expect(error.message).toBe("GitHub Copilot Auto negotiation transport failed");
+  });
+  test.each(["malformed-pool", "unsupported-endpoint"])("%s is refused before inference", async scenario => {
+    const provider = { authMode: "oauth", baseUrl: "https://api.githubcopilot.com", fetch: (async url => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "eligible", supported_endpoints: ["/unrecognized"] }] });
+      if (String(url).endsWith("/models/session")) return Response.json({ session_token: "private-session", available_models:
+        scenario === "malformed-pool" ? ["eligible", {}] : ["eligible"] });
+      return Response.json({ candidate_models: ["eligible"] });
+    }) as typeof fetch } as OcxProviderConfig;
+    await expect(resolveCopilotAuto(provider, "auto", parsed)).rejects.toThrow(scenario === "malformed-pool"
+      ? "omitted its routing credentials" : "no supported inference endpoint");
   });
   test("manual named requests make no discovery calls, detect outage preserves legacy route", async () => {
     let calls = 0;

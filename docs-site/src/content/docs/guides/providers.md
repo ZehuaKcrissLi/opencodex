@@ -1270,7 +1270,13 @@ named-model selection. This setting controls model selection and does not change
 permissions. Stored manual model preferences return when you switch back to manual mode.
 CLI: `ocx provider edit github-copilot --copilot-model-selection auto`.
 
-Copilot fronts a mixed-wire catalog: the following models (`gpt-5.3-codex`, `gpt-5.4`,
+Auto follows the session and intent protocol in the public
+[VS Code Copilot Chat implementation](https://github.com/microsoft/vscode-copilot-chat/blob/7b70532a4cbdfa61c2b30fe4ccffda3d89336a4d/src/platform/endpoint/node/automodeService.ts).
+This is an experimental client integration, not a documented third-party API contract;
+GitHub may change the protocol or account permissions. Auto uses the selected model’s
+advertised endpoint for each request.
+
+For named selections, Copilot fronts a mixed-wire catalog: the following models (`gpt-5.3-codex`, `gpt-5.4`,
 `gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker`) reject
 `/chat/completions` for agent traffic, so opencodex routes those models over the
 Responses API by built-in default while every other Copilot model stays on chat

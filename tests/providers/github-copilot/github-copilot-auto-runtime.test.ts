@@ -49,21 +49,38 @@ async function accounts() {
   await setActiveAccount("github-copilot", a);
   return { a, b };
 }
-function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number } = {}) {
+function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number; negotiationRefusal?: number; negotiationRefusalAt?: number; alwaysRefuse?: boolean; advanceAfterIntent?: () => void } = {}) {
   const sent: Array<{ host: string; path: string; token: string | null; body: any }> = [];
   let inferenceCount = 0;
+  let sessionCount = 0;
+  let intentCount = 0;
   const executor = (async (url, init) => {
     const destination = new URL(String(url));
-    const account = new Headers(init?.headers).get("authorization")?.endsWith("-b") ? "b" : "a";
+    if (destination.hostname === "api.github.com") {
+      const refreshedAccount = new Headers(init?.headers).get("authorization")?.includes("-b") ? "b" : "a";
+      if (destination.pathname === "/user") return Response.json({ login: refreshedAccount });
+      return Response.json({ token: `synthetic-access-${refreshedAccount}-renewed`, refresh_in: 1500,
+        endpoints: { api: `https://${refreshedAccount}.githubcopilot.com` } });
+    }
+    const account = new Headers(init?.headers).get("authorization")?.includes("-b") ? "b" : "a";
     const model = account === "a" ? "gpt-4o" : "gpt-5.4";
     const headers = new Headers(init?.headers);
     const body = init?.body ? JSON.parse(String(init.body)) : {};
-    expect(headers.get("authorization")).toBe(`Bearer synthetic-access-${account}`);
+    expect(headers.get("authorization")).toStartWith(`Bearer synthetic-access-${account}`);
     sent.push({ host: destination.host, path: destination.pathname, token: headers.get("copilot-session-token"), body });
     if (destination.pathname === "/models") return Response.json({ data: [{ id: model, model_picker_enabled: false,
       supported_endpoints: [account === "a" ? "/chat/completions" : "/responses"] }] });
-    if (destination.pathname === "/models/session") return Response.json({ session_token: `synthetic-session-${account}`, available_models: [model] });
-    if (destination.pathname === "/models/session/intent") return Response.json({ candidate_models: [model] });
+    if (destination.pathname === "/models/session") {
+      sessionCount++;
+      if (options.negotiationRefusal && (sessionCount === (options.negotiationRefusalAt ?? 1) || options.alwaysRefuse)) return Response.json({ token: "must-not-echo" },
+        { status: options.negotiationRefusal, headers: { "retry-after": "12" } });
+      return Response.json({ session_token: `synthetic-session-${account}`, expires_at: Date.now() / 1000 + 10, available_models: [model] });
+    }
+    if (destination.pathname === "/models/session/intent") {
+      intentCount++;
+      if (intentCount === 1) options.advanceAfterIntent?.();
+      return Response.json({ candidate_models: [model] });
+    }
     expect(body.model).toBe(model);
     expect(headers.get("copilot-session-token")).toBe(`synthetic-session-${account}`);
     inferenceCount++;
@@ -80,10 +97,85 @@ function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; ref
     ...(options.key ? { apiKey: "synthetic-access-a", apiKeyPool: [{ id: "a", key: "synthetic-access-a" }, { id: "b", key: "synthetic-access-b" }] } : {}), baseUrl: "https://api.githubcopilot.com", models: ["gpt-4o"],
     defaultModel: "gpt-4o", selectedModels: ["gpt-4o"], copilotModelSelection: "auto", fetch: executor,
   } }, oauthAccountFailover: { enabled: true } } as OcxConfig;
-  if (options.key) globalThis.fetch = executor;
+  if (options.key || options.negotiationRefusal) globalThis.fetch = executor;
   return { config, sent };
 }
 describe("Copilot Auto through the Responses pipeline", () => {
+  test("a session that expires while preparing dispatch is renewed without a second concurrency lease", async () => {
+    await accounts();
+    const actualNow = Date.now;
+    let offset = 0;
+    Date.now = () => actualNow() + offset;
+    try {
+      const { config, sent } = fixture({ advanceAfterIntent: () => { offset = 20_000; } });
+      config.providers["github-copilot"]!.requestPacing = { enabled: true, maxConcurrentRequests: 1 };
+      const response = await handleResponses(request("hello"), config, { model: "", provider: "" });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('"delta":"ok"');
+      expect(sent.filter(call => call.path === "/models/session")).toHaveLength(2);
+      expect(sent.filter(call => call.path === "/chat/completions")).toHaveLength(1);
+    } finally { Date.now = actualNow; }
+  });
+  test("negotiation 401 refreshes OAuth once, then dispatches with the new credential", async () => {
+    await accounts();
+    const { config, sent } = fixture({ negotiationRefusal: 401 });
+    const response = await handleResponses(request("hello"), config, { model: "", provider: "" });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"delta":"ok"');
+    expect(sent.filter(call => call.path === "/models/session")).toHaveLength(2);
+    expect(sent.filter(call => call.path === "/chat/completions")).toHaveLength(1);
+  });
+  test("a second negotiation 401 stops after the one allowed OAuth refresh", async () => {
+    await accounts();
+    const { config, sent } = fixture({ negotiationRefusal: 401, alwaysRefuse: true });
+    const response = await handleResponses(request("hello"), config, { model: "", provider: "" });
+    expect(response.status).toBe(401);
+    expect(await response.text()).not.toContain("must-not-echo");
+    expect(sent.filter(call => call.path === "/models/session")).toHaveLength(2);
+    expect(sent.filter(call => call.path === "/chat/completions")).toHaveLength(0);
+  });
+  test("OAuth rotation followed by negotiation 401 keeps the renewed account snapshot", async () => {
+    await accounts();
+    const { config, sent } = fixture({ rotate: true, negotiationRefusal: 401, negotiationRefusalAt: 2 });
+    await saveConfig(config);
+    const response = await handleResponses(request("hello", false), config, { model: "", provider: "" });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(await response.text()).status).toBe("completed");
+    expect(sent.filter(call => call.path === "/models/session").map(call => call.host)).toEqual([
+      "a.githubcopilot.com", "b.githubcopilot.com", "b.githubcopilot.com",
+    ]);
+    expect(sent.filter(call => call.path === "/responses")).toHaveLength(1);
+    expect(getAccountSet("github-copilot")!.accounts.find(row => row.credential.accountId === "b")!.credential.access)
+      .toBe("synthetic-access-b-renewed");
+  });
+  test("expired-dispatch negotiation 429 uses the existing bounded recovery path", async () => {
+    await accounts();
+    const actualNow = Date.now;
+    let offset = 0;
+    Date.now = () => actualNow() + offset;
+    try {
+      const { config, sent } = fixture({ advanceAfterIntent: () => { offset = 20_000; },
+        negotiationRefusal: 429, negotiationRefusalAt: 2 });
+      await saveConfig(config);
+      const response = await handleResponses(request("hello", false), config, { model: "", provider: "" });
+      expect(response.status).toBe(200);
+      const result = await response.json() as { status: string };
+      expect(result.status).toBe("completed");
+      expect(JSON.stringify(result)).not.toContain("must-not-echo");
+      expect(sent.filter(call => call.path === "/models/session")).toHaveLength(3);
+      expect(sent.filter(call => ["/chat/completions", "/responses"].includes(call.path))).toHaveLength(1);
+      expect(sent.find(call => call.path === "/responses")!.host).toBe("b.githubcopilot.com");
+    } finally { Date.now = actualNow; }
+  });
+  test("negotiation 429 preserves Retry-After and never dispatches inference or echoes its body", async () => {
+    await accounts();
+    const { config, sent } = fixture({ negotiationRefusal: 429 });
+    const response = await handleResponses(request("hello"), config, { model: "", provider: "" });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("12");
+    expect(await response.text()).not.toContain("must-not-echo");
+    expect(sent.filter(call => call.path === "/chat/completions")).toHaveLength(0);
+  });
   test.each([401, 429])("key pool %s rotation reacquires a new session and endpoint", async status => {
     const { config, sent } = fixture({ key: true, rotate: true, refusal: status });
     await saveConfig(config);
