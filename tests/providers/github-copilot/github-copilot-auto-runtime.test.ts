@@ -9,6 +9,7 @@ import { clearGenericFailoverHealth } from "../../../src/oauth/generic-account-f
 import { clearCopilotAutoModelsForTests } from "../../../src/providers/github-copilot-auto";
 import { fetchProviderModels } from "../../../src/codex/catalog/provider-models";
 import { filterCatalogVisibleModels } from "../../../src/codex/catalog/model-visibility";
+import { reconcileSuccessfulModelDiscoveries } from "../../../src/providers/new-model-policy";
 import type { OcxConfig } from "../../../src/types";
 import { acquireOwnedSpendHome } from "../../helpers/owned-spend-home";
 import { removeTreeWithRetry } from "../../helpers/remove-tree";
@@ -102,6 +103,23 @@ describe("Copilot Auto through the Responses pipeline", () => {
     const models = await fetchProviderModels("github-copilot", config.providers["github-copilot"]!, 1000);
     expect(filterCatalogVisibleModels(models, config).map(model => model.id)).toEqual(["auto"]);
     config.providers["github-copilot"]!.disabled = true;
+    expect(filterCatalogVisibleModels(models, config)).toEqual([]);
+  });
+  test("an existing Off-policy baseline exposes Auto and preserves an explicit Auto disable", async () => {
+    const { config } = fixture();
+    delete config.providers["github-copilot"]!.selectedModels;
+    config.modelDiscovery = { newModelPolicy: "off", knownModels: {
+      "github-copilot": { ids: ["gpt-4o"], removed: [], updatedAt: "2026-01-01T00:00:00Z" },
+    } };
+    const models = await fetchProviderModels("github-copilot", config.providers["github-copilot"]!, 1000);
+    reconcileSuccessfulModelDiscoveries({ config, models, authoritativeProviders: ["github-copilot"],
+      now: "2026-10-02T00:00:00Z", mode: "discovery" });
+    expect(config.disabledModels ?? []).not.toContain("github-copilot/auto");
+    expect(filterCatalogVisibleModels(models, config).map(model => model.id)).toEqual(["auto"]);
+    config.disabledModels = ["github-copilot/auto"];
+    reconcileSuccessfulModelDiscoveries({ config, models, authoritativeProviders: ["github-copilot"],
+      now: "2026-10-02T00:01:00Z", mode: "discovery" });
+    expect(config.disabledModels).toEqual(["github-copilot/auto"]);
     expect(filterCatalogVisibleModels(models, config)).toEqual([]);
   });
   test("streamed function calls and their result history use existing Chat adapter", async () => {

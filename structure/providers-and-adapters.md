@@ -17,7 +17,8 @@ while `manual` retains named-model selection. Detection uses account permissions
 inferring a subscription from model names: boolean `model_picker_enabled` evidence with no true
 row selects Auto; missing permission evidence retains legacy named routes. Explicit `auto` mode
 routes existing named selections through Auto too. Auto-only discovery exposes `auto` without deleting
-saved manual model preferences. The public selector is `github-copilot/auto`.
+saved manual model preferences. The public selector is `github-copilot/auto`. As a routing selector,
+it is exempt from automatic disabling by new-model policy; explicit operator disables still win.
 Before adapter construction, Auto creates an upstream session and resolves intent against the
 captured credential and API origin. The selected model determines Chat versus Responses wire
 and its session token travels only with that request. Sessions are ephemeral, are not saved in
