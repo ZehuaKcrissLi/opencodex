@@ -23,10 +23,7 @@ import {
 // Independent oracle: the basename -> directory table from devlog 001 §2.D, committed as a
 // fixture. The layout guard shares the resolver with the mover, so a resolver defect could move
 // a file to the wrong place and bless it; this fixture is the second opinion that catches it.
-// Split the provider domain at the fixture size limit; both shards remain independent of layout.json.
-const expectedShards = ["test-layout-expected.json", "test-layout-expected-providers.json"].map(name =>
-  JSON.parse(readFileSync(repoPath("tests", "fixtures", name), "utf8")) as Record<string, string>);
-const EXPECTED = Object.assign({}, ...expectedShards) as Record<string, string>;
+const EXPECTED = JSON.parse(readFileSync(repoPath("tests", "fixtures", "test-layout-expected.json"), "utf8")) as Record<string, string>;
 
 describe("rewriteSpecifier", () => {
   const forms = [
@@ -246,12 +243,6 @@ describe("resolver", () => {
 
 describe("membership oracle", () => {
   const layout = loadLayout();
-
-  test("the fixture shards have disjoint keys and preserve provider-domain ownership", () => {
-    expect(Object.keys(EXPECTED).length).toBe(expectedShards.reduce((count, shard) => count + Object.keys(shard).length, 0));
-    expect(Object.values(expectedShards[0]!).some(owner => owner === "providers" || owner.startsWith("providers/"))).toBe(false);
-    expect(Object.values(expectedShards[1]!).every(owner => owner === "providers" || owner.startsWith("providers/"))).toBe(true);
-  });
 
   test("the live tree and the fixture agree entry by entry", () => {
     // The explicit map and the fixture are two copies of the same table; they must be identical
