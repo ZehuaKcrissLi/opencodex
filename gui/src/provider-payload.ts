@@ -82,6 +82,7 @@ export interface ProviderPayload {
   allowPrivateNetwork?: boolean;
 }
 
+/** Serialize editable provider fields, limiting Copilot selection mode to its canonical provider. */
 export function buildProviderPayload(form: ProviderPayloadForm): ProviderPayload {
   const provider: ProviderPayload = {
     adapter: form.adapter.trim(),

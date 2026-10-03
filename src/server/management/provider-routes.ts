@@ -903,6 +903,7 @@ function providerRoutingQuota(config: OcxConfig, name: string, now: number): Pro
   return { state, updatedAt: quota.updatedAt, validUntil };
 }
 
+/** Serve provider management reads and validated writes without exposing persisted credentials. */
 export async function handleProviderRoutes(ctx: ManagementContext): Promise<Response | null> {
   const { req, url, config, deps, principal, convergeCodexCatalog, syncClaudeAgentDefsBestEffort } = ctx;
 

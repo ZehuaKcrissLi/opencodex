@@ -15,6 +15,7 @@ function adapterOptions(current: string): string[] {
   return current && !FORM_ADAPTERS.includes(current) ? [current, ...FORM_ADAPTERS] : FORM_ADAPTERS;
 }
 
+/** Render provider-specific transport and account settings from the shared add-provider form. */
 export function AddProviderFormPane({
   preset,
   form,

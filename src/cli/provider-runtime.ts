@@ -56,6 +56,7 @@ function cleared(value: string | undefined): string | undefined {
   return value === "-" ? "" : value;
 }
 
+/** Validate provider edit flags and submit one management patch, including Copilot selection mode. */
 async function edit(argv: string[], deps: RuntimeApiDeps): Promise<void> {
   const args = [...argv];
   const name = args.shift()?.trim();

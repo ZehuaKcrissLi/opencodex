@@ -49,7 +49,7 @@ async function accounts() {
   await setActiveAccount("github-copilot", a);
   return { a, b };
 }
-function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number; negotiationRefusal?: number; negotiationRefusalAt?: number; alwaysRefuse?: boolean; advanceAfterIntent?: () => void } = {}) {
+function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number; negotiationRefusal?: number; negotiationRefusalAt?: number; alwaysRefuse?: boolean; advanceAfterIntent?: () => void; onSession?: (count: number) => void; malformedSessionAt?: number; negotiationRetryAfter?: string } = {}) {
   const sent: Array<{ host: string; path: string; token: string | null; body: any }> = [];
   let inferenceCount = 0;
   let sessionCount = 0;
@@ -72,8 +72,10 @@ function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; ref
       supported_endpoints: [account === "a" ? "/chat/completions" : "/responses"] }] });
     if (destination.pathname === "/models/session") {
       sessionCount++;
+      options.onSession?.(sessionCount);
+      if (sessionCount === options.malformedSessionAt) return Response.json({ session_token: "must-not-echo" });
       if (options.negotiationRefusal && (sessionCount === (options.negotiationRefusalAt ?? 1) || options.alwaysRefuse)) return Response.json({ token: "must-not-echo" },
-        { status: options.negotiationRefusal, headers: { "retry-after": "12" } });
+        { status: options.negotiationRefusal, headers: { "retry-after": options.negotiationRetryAfter ?? "12" } });
       return Response.json({ session_token: `synthetic-session-${account}`, expires_at: Date.now() / 1000 + 10, available_models: [model] });
     }
     if (destination.pathname === "/models/session/intent") {
@@ -188,6 +190,59 @@ describe("Copilot Auto through the Responses pipeline", () => {
       ["/chat/completions", "gpt-4o", "synthetic-session-a"],
       ["/responses", "gpt-5.4", "synthetic-session-b"],
     ]);
+  });
+
+  for (const firstStatus of [401, 429]) {
+    test.each([401, 403, 429])(`key ${firstStatus} replacement negotiation refusal %s is mapped safely`, async status => {
+      const { config, sent } = fixture({ key: true, rotate: true, refusal: firstStatus,
+        negotiationRefusal: status, negotiationRefusalAt: 2 });
+      saveConfig(config);
+      const response = await handleResponses(request("hello", false), config, { model: "", provider: "" });
+      expect(response.status).toBe(status);
+      expect(response.headers.get("retry-after")).toBe("12");
+      expect(await response.text()).not.toContain("must-not-echo");
+      expect(sent.filter(call => ["/chat/completions", "/responses"].includes(call.path))).toHaveLength(1);
+    });
+    test(`key ${firstStatus} replacement malformed negotiation is a bounded 502`, async () => {
+      const { config, sent } = fixture({ key: true, rotate: true, refusal: firstStatus, malformedSessionAt: 2 });
+      saveConfig(config);
+      const response = await handleResponses(request("hello", false), config, { model: "", provider: "" });
+      expect(response.status).toBe(502);
+      expect(await response.text()).not.toContain("must-not-echo");
+      expect(sent.filter(call => ["/chat/completions", "/responses"].includes(call.path))).toHaveLength(1);
+    });
+    test(`key ${firstStatus} replacement negotiation cancellation is contained`, async () => {
+      const controller = new AbortController();
+      const { config, sent } = fixture({ key: true, rotate: true, refusal: firstStatus,
+        onSession: count => { if (count === 2) controller.abort(); } });
+      saveConfig(config);
+      const response = await handleResponses(request("hello", false), config, { model: "", provider: "" },
+        { abortSignal: controller.signal });
+      expect(response.status).toBe(499);
+      expect(sent.filter(call => ["/chat/completions", "/responses"].includes(call.path))).toHaveLength(1);
+    });
+  }
+  test("replacement negotiation discards a secret-bearing Retry-After", async () => {
+    const { config } = fixture({ key: true, rotate: true, negotiationRefusal: 429,
+      negotiationRefusalAt: 2, negotiationRetryAfter: "must-not-echo" });
+    saveConfig(config);
+    const response = await handleResponses(request("hello", false), config, { model: "", provider: "" });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.text()).not.toContain("must-not-echo");
+  });
+  test.each(["key", "oauth"])("web-search %s rotation keeps the original 429 when negotiation fails", async mode => {
+    if (mode === "oauth") await accounts();
+    const { config, sent } = fixture({ key: mode === "key", rotate: true, negotiationRefusal: 403, negotiationRefusalAt: 2 });
+    config.webSearchSidecar = { backend: "exa", exaApiKey: "synthetic-search-key" };
+    saveConfig(config);
+    const req = new Request("http://localhost/v1/responses", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "github-copilot/auto", input: "hello", stream: false, tools: [{ type: "web_search" }] }) });
+    const response = await handleResponses(req, config, { model: "", provider: "" });
+    expect(response.status).toBe(429);
+    expect(await response.text()).toContain("limited");
+    expect(sent.filter(call => ["/chat/completions", "/responses"].includes(call.path))).toHaveLength(1);
+    expect(sent.filter(call => call.path === "/models/session")).toHaveLength(2);
   });
 
   test("Auto-only catalog survives saved manual allowlists and explicit provider disable still wins", async () => {

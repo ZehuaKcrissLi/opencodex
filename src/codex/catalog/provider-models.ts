@@ -1,4 +1,4 @@
-import { fetchCopilotAutoModels, copilotPickerModels } from "../../providers/github-copilot-auto";
+import { fetchCopilotAutoModels, copilotPickerModels, copilotRequiresAuto } from "../../providers/github-copilot-auto";
 import { resolveGithubCopilotTransport } from "../../providers/github-copilot-transport";
 import { resolveCopilotApiBaseUrl } from "../../oauth/github-copilot";
 import { effectiveProviderAlias, effectiveProviderAliasDecision } from "../../providers/default-aliases";
@@ -163,6 +163,7 @@ export function observedModelsAuthResolver(
     },
   };
 }
+/** Project captured discovery through config hints and retention; Auto-only Copilot exposes only Auto. */
 export async function fetchProviderModelsWithAuth(
   captured: CapturedProviderGather,
   ttlMs: number,
@@ -233,7 +234,8 @@ export async function fetchProviderModelsWithAuth(
   // Static catalogs never need an OAuth refresh or an upstream model request. Clear any
   // discovery failure left by an older live configuration even when the account is logged out.
   if (name === "github-copilot" && prov.copilotModelSelection === "auto")
-    return observed([{ id: "auto", provider: name }], "authoritative");
+    return observed([applyProviderConfigHints(name, prov, { id: "auto", provider: name },
+      contextCap, metadataModelIdCaseFold, captured.effectiveAlias)], "authoritative");
   if (prov.liveModels === false) {
     clearProviderDiscoveryStatus(name);
     if (name === "kiro") {
@@ -283,13 +285,16 @@ export async function fetchProviderModelsWithAuth(
       ? resolveCopilotApiBaseUrl(auth.oauthApiBaseUrl) : undefined);
     try {
       const models = await fetchCopilotAutoModels(transport, AbortSignal.timeout(8_000), undefined, ttlMs);
-      const picker = copilotPickerModels(prov, models).map(model => ({
+      const picker = copilotPickerModels(prov, models).map(model => applyProviderConfigHints(name, prov, {
         id: model.id, provider: name,
         ...catalogHintsFromModelsApiItem(name, model as ProviderModelsApiItem),
-      }));
+      }, contextCap, metadataModelIdCaseFold, captured.effectiveAlias));
       if (!isCurrentCacheGeneration()) return observed(configured, "degraded");
       markProviderDiscoveryOk(name, picker.length);
-      return observed(picker, "authoritative");
+      // Retain callable manual/combo selectors, but do not advertise named selection
+      // for an Auto-only account even when its saved configuration still contains it.
+      return observed(copilotRequiresAuto(prov, models)
+        ? picker : withConfiguredRetention(picker, { warnDrops: true }), "authoritative");
     } catch {
       if (isCurrentCacheGeneration()) markProviderDiscoveryFailed(name, { reason: "provider" });
       return observed(configured, "degraded");
@@ -773,20 +778,29 @@ export async function fetchProviderModelsWithAuth(
       const live = antigravity.map(model => applyProviderConfigHints(name, prov, {
         id: model.id,
         provider: name,
-        // CCA only exposes a numeric thinking budget. Until the adapter owns an exact Codex
-        // effort-to-wire mapping for a newly discovered model, do not advertise a false ladder.
-        reasoningEfforts: [],
+        // Only an exact discovered wire map proves a new model's selectable effort ladder.
+        reasoningEfforts: Object.keys(model.effortWireModelIds ?? {}),
+        ...(model.effortWireModelIds ? {
+          antigravityEffortWireModelIds: model.effortWireModelIds,
+          suppressSyntheticMax: true,
+          defaultReasoningEffort: model.effortWireModelIds.medium ? "medium" : "high",
+        } : {}),
         ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
         ...(model.inputModalities ? { inputModalities: model.inputModalities } : {}),
       }, contextCap, metadataModelIdCaseFold, captured.effectiveAlias));
       const forCache = withConfiguredRetention(live, { retainComboTargets: false });
-      if (!setCached(name, forCache, Date.now(), cacheGeneration)) {
+      if (!isCurrentCacheGeneration()) {
         return observed(withConfiguredRetention(configured), "degraded");
       }
+      // Save exact family routes before publishing synthetic IDs. These synchronous writes
+      // cannot interleave with a credential-generation change; failure keeps the prior cache.
       registerAntigravityDiscoveredWireModels(prov.baseUrl, antigravity, {
         provider: name,
         cacheGeneration,
       });
+      if (!setCached(name, forCache, Date.now(), cacheGeneration)) {
+        return observed(withConfiguredRetention(configured), "degraded");
+      }
       markProviderDiscoveryOk(name, live.length);
       return observed(withConfiguredRetention(forCache, { warnDrops: true }), "authoritative");
     }

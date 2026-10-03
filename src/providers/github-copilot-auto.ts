@@ -16,22 +16,27 @@ const catalogs = new Map<string, { expires: number; models: CopilotModel[] }>();
 const MAX_MODELS = 512;
 const MAX_RESPONSE_BYTES = 1_048_576;
 export class CopilotAutoHttpError extends Error {
+  /** Preserve only the upstream status and bounded retry delay; never retain response bodies. */
   constructor(readonly status: number, readonly retryAfter?: string) {
     super(githubCopilotHttpError("Auto negotiation", status).message);
   }
 }
+/** Reject array/scalar payloads before interpreting negotiation objects. */
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined;
 }
+/** Accept a bounded, homogeneous list so malformed pools cannot grant routing eligibility. */
 function strings(value: unknown): string[] {
   return Array.isArray(value) && value.length <= MAX_MODELS
     && value.every(v => typeof v === "string" && v.length > 0 && v.length <= 256)
     ? value as string[] : [];
 }
+/** Isolate discovery caches by endpoint and credential without storing plaintext cache keys. */
 function authority(provider: OcxProviderConfig): string {
   return createHash("sha256").update(JSON.stringify([provider.baseUrl, provider.apiKey])).digest("hex");
 }
+/** Make one paced, origin-fenced negotiation send with bounded decoding and secret-safe errors. */
 async function requestJson(provider: OcxProviderConfig, path: string, signal?: AbortSignal, body?: unknown,
   sessionToken?: string, beforeSend?: () => boolean, concurrency = true): Promise<Record<string, unknown>> {
   const boundedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000);
@@ -81,11 +86,13 @@ export function copilotRequiresAuto(provider: OcxProviderConfig, models: Copilot
   const permissionKnown = models.some(model => typeof model.model_picker_enabled === "boolean");
   return permissionKnown && !models.some(model => model.model_picker_enabled === true);
 }
+/** Project manual-picker permissions; inventory-only accounts expose the synthetic Auto selector. */
 export function copilotPickerModels(provider: OcxProviderConfig, models: CopilotModel[]): CopilotModel[] {
   if (copilotRequiresAuto(provider, models)) return [{ id: "auto" }];
   const permissionKnown = models.some(model => typeof model.model_picker_enabled === "boolean");
   return permissionKnown ? models.filter(model => model.model_picker_enabled === true) : models;
 }
+/** Read the credential-bound catalog; callers may disable caching or reuse an existing lease. */
 export async function fetchCopilotAutoModels(provider: OcxProviderConfig, signal?: AbortSignal,
   beforeSend?: () => boolean, cacheTtlMs = 60_000, concurrency = true): Promise<CopilotModel[]> {
   const key = authority(provider);
@@ -103,6 +110,7 @@ export async function fetchCopilotAutoModels(provider: OcxProviderConfig, signal
   if (cacheTtlMs > 0) catalogs.set(key, { expires: Date.now() + Math.min(cacheTtlMs, 60_000), models });
   return models;
 }
+/** Reset discovery state between isolated account/permission regression cases. */
 export function clearCopilotAutoModelsForTests(): void { catalogs.clear(); }
 
 /** Resolve before adapter construction: the server can choose either wire on every turn. */

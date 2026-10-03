@@ -24,7 +24,7 @@ validation-pending. Import alone supplies no entitlement evidence for the model 
 
 ## Shared catalog
 
-Static policy and observed catalog evidence are separate authorities.
+Static policy and observed catalog evidence are separate authorities. Antigravity grouping and selection projection follow the [discovered effort-family contract](providers-and-adapters.md#antigravity-effort-families).
 `src/providers/resolved-model-policy.ts` resolves and freezes only registry/operator static facts,
 hard wire pins, aliases, and explicit false/empty declarations. Discovery responses, generated
 metadata, cache freshness, availability, credentials, account state, quota and health never enter
@@ -207,7 +207,7 @@ than pairing a durable account key with the provider registry's default host. Th
 the provider connection test and for refreshing catalog gathers of every OAuth row: the token and
 its origin come from one snapshot, so a Copilot account switch or a refresh that moves the
 account's API host cannot pair one account's token with another origin, and a key row never
-borrows a stored OAuth account's origin. When the snapshot carries no API host (a legacy credential), the destination comes only from static configuration validated against the vendor allowlist, or the vendor default, and never from the live credential store. If the stored
+borrows a stored OAuth account's origin. Copilot `copilotModelSelection` projects effective Auto-only visibility without deleting manual selections; see the [Copilot Auto contract](providers-and-adapters.md#github-copilot-auto-selection). Auto rows and live named rows apply captured provider capability hints and the context cap. Manual-capable rosters retain explicit configured and combo-target selectors through the shared retention contract; Auto-only rosters keep only Auto even when named selectors remain saved. When the snapshot carries no API host (a legacy credential), the destination comes only from static configuration validated against the vendor allowlist, or the vendor default, and never from the live credential store. If the stored
 destination is invalid, registered Devin discovery and routing use the registry's fixed base URL
 instead of a stale configured override. For Devin, the irreversible roster fingerprint covers
 both credential and validated destination, so switching either observes neither fresh nor stale
@@ -284,6 +284,8 @@ Older proxies without `/readyz` fail closed as unreachable. `/healthz` remains t
 liveness contract.
 
 ## Entry shape
+
+Client exports consume effective model metadata without rewriting custom-model editor overrides. `src/server/management/model-row-export-metadata.ts` resolves inheritance from the gathered catalog and registry-enriched configuration; the [export contract](clients/integrations.md#owned-catalog-convergence) separates declared defaults from picker preferences and preserves cleared effort ladders.
 
 Routed entries keep Codex-required metadata such as reasoning levels, shell type, API support flags,
 base instructions, modalities, auto-compact fields, and strict parser booleans. The public slug uses
@@ -595,6 +597,4 @@ Startup and explicit catalog synchronization in `src/codex/sync.ts` refresh the 
 `src/providers/reasoning-metadata.ts` effort snapshot for supported destinations before catalog
 gathering. Each sync waits at most two seconds for a fresh or shared fetch, then continues with the existing snapshot; the fetch retains its own abort deadline. Routed effort reads in
 `src/reasoning-effort.ts` use a snapshot immediately and request a best-effort background refresh
-only when an existing snapshot answers with an expired ladder. Missing or corrupt snapshots do not fetch on the request path; catalog sync owns their bootstrap.
-
-Copilot `copilotModelSelection` projects effective Auto-only visibility without deleting manual selections; see the [Copilot Auto contract](providers-and-adapters.md#github-copilot-auto-selection).
+only when an existing snapshot answers with an expired ladder. Missing or corrupt snapshots do not fetch on the request path; catalog sync owns their bootstrap. Automatic account exhaustion and recovery use the [spendable Codex credit evidence contract](providers/openai-tiers.md#spendable-codex-credits), including independent freshness, upstream refusal, and reset-ticket separation.

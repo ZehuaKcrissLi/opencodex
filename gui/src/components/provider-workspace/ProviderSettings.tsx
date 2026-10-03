@@ -61,6 +61,7 @@ function pacingSignature(value: WorkspaceItem["requestPacing"] | undefined): str
   ]);
 }
 
+/** Edit provider settings while preserving manual choices when Copilot exposes only Auto. */
 export default function ProviderSettings({
   item, availableModels = EMPTY_MODELS, apiBase, onUpdateProvider, onDirtyChange, onRegisterSave,
 }: {
@@ -237,6 +238,7 @@ export default function ProviderSettings({
   // On fetch error, keep it editable so allowBaseUrlOverride providers are not trapped.
   const plainBaseUrlLocked = isPreset && choicesStatus !== "error";
 
+  /** Persist current drafts together; Auto-only display never rewrites saved manual model preferences. */
   const save = async (): Promise<boolean> => {
     if (!onUpdateProvider) { setMsg({ ok: false, text: t("pws.updatesUnavailable") }); return false; }
     if (modeSaving) return false;
@@ -333,6 +335,7 @@ export default function ProviderSettings({
     select.value = accountMode;
   };
 
+  /** Restore drafts from the persisted provider, including the Copilot selection mode. */
   const discard = () => {
     setCopilotModelSelection(item.copilotModelSelection ?? "detect");
     setAdapter(item.adapter); setBaseUrl(item.baseUrl);

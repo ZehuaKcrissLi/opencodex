@@ -32,6 +32,7 @@ export type ProviderConfig = ProviderPayload;
 
 type Preset = CatalogPreset;
 
+/** Keep provider-specific setup choices until authenticated provider configuration is saved successfully. */
 export default function AddProviderModal({
   apiBase, existingNames, onClose, onAdded, initialTier, initialCustom = false,
   accountRows, accountStatus, accountBusy, accountLoginHint = null,
@@ -104,6 +105,7 @@ export default function AddProviderModal({
     { deadlineMs: 60_000 }, // shared usage-summary key: all four subscribers raise the deadline together
   );
 
+  const copilotSelectionRef = useRef<ProviderConfig["copilotModelSelection"]>(undefined);
   const oauthSupported = oauthPoll.data ?? [];
   const presets = presetsPoll.data ?? fallbackPresets;
   const presetsLoading = presetsPoll.loading;
@@ -113,6 +115,9 @@ export default function AddProviderModal({
     oauthDeviceCode, oauthInstructions, oauthBrowserLaunch,
     manualCode, manualCodeBusy, manualCodeMsg, manualCodeOk, endpointChoice, oauthTosPending,
   } = state;
+  useEffect(() => {
+    if (preset?.id === "github-copilot") copilotSelectionRef.current = form?.copilotModelSelection;
+  }, [form?.copilotModelSelection, preset?.id]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -219,20 +224,22 @@ export default function AddProviderModal({
     }
   };
 
+  /** Persist the latest Copilot-owned choice before notifying the parent to close the form. */
+  const completeAddedProvider = async (name: string, isCurrent: () => boolean) => {
+    if (name === "github-copilot" && copilotSelectionRef.current !== undefined) {
+      const result = await fetch(`${apiBase}/api/providers?name=github-copilot`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copilotModelSelection: copilotSelectionRef.current }),
+      });
+      if (!result.ok) throw new Error(t("prov.saveFailed"));
+    }
+    if (isCurrent()) onAdded(name);
+  };
   const {
     cancelLoginOAuth,
     loginOAuth,
     submitManualCode: submitManualCodeApi,
-  } = useAddProviderOAuth({ apiBase, t, aliveRef, onAdded: async name => {
-    if (name === "github-copilot" && form?.copilotModelSelection !== undefined) {
-      const result = await fetch(`${apiBase}/api/providers?name=github-copilot`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ copilotModelSelection: form.copilotModelSelection }),
-      });
-      if (!result.ok) throw new Error(t("prov.saveFailed"));
-    }
-    onAdded(name);
-  } });
+  } = useAddProviderOAuth({ apiBase, t, aliveRef, onAdded: completeAddedProvider });
 
   const oauthSetters = {
     setOauthBusy: (busy: boolean) => dispatch({ type: "set-oauth-busy", busy }),

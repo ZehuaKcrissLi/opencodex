@@ -13,6 +13,7 @@ export function providerServiceTierConfigError(name: unknown, provider: unknown)
   return error ? `provider ${name} ${error}` : null;
 }
 
+/** Reject invalid catalog overrides before management writes, including provider-specific Copilot modes. */
 export function providerCatalogCapabilityConfigError(name: unknown, provider: unknown): string | null {
   const serviceTierError = providerServiceTierConfigError(name, provider);
   if (serviceTierError) return serviceTierError;

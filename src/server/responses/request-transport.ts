@@ -246,6 +246,7 @@ export async function prepareResponsesTransport(
    */
   let passiveQuotaWriterGeneration = 0;
   const copilotRequestedModel = route.modelId;
+  /** Project only bounded Copilot refusal metadata; upstream bodies and session tokens never reach the client. */
   const copilotRefusalResponse = (error: unknown): Response | undefined => {
     if (!(error instanceof CopilotAutoHttpError) || ![401, 403, 429].includes(error.status)) return;
     const response = formatErrorResponse(error.status, error.status === 429 ? "rate_limit_error" : "authentication_error",
@@ -256,8 +257,10 @@ export async function prepareResponsesTransport(
   let copilotSessionExpiresAt = Infinity;
   let copilotNegotiationRefreshed = false;
   let copilotAutoAdapter: OcxProviderConfig["adapter"] | undefined;
+  /** Resolve the request's ephemeral wire selection and recover at most one OAuth negotiation 401. */
   const resolveCopilotSelection = async (requestParsed: OcxParsedRequest, insideDispatch = false): Promise<void> => {
     if (route.providerName !== "github-copilot" || route.provider.authMode === "forward") return;
+    /** Fence control-plane sends to the captured credential; reuse an already-held dispatch concurrency lease. */
     const negotiate = () => {
       const binding: DispatchBinding | undefined = oauthSelection && servingOAuthSnapshot
         ? { kind: "oauth", selection: { ...oauthSelection }, snapshot: servingOAuthSnapshot }
@@ -420,6 +423,7 @@ export async function prepareResponsesTransport(
       && (route.providerName !== "anthropic" || !getAnthropicAccountHealthSnapshot(binding.snapshot.accountId) && !anthropicRatePauseUntil(binding.snapshot.accountId) && !anthropicFamilyRejected(binding.snapshot.accountId, route.modelId))
       && credentialGeneration(row.credential) === binding.snapshot.generation;
   };
+  /** Bind the negotiated wire adapter and its built requests to the serving credential's authority. */
   const resolveSelectionAdapter = (provider: OcxProviderConfig, retention = config.cacheRetention): ProviderAdapter => {
     if (copilotAutoAdapter) provider = { ...provider, adapter: copilotAutoAdapter };
     const resolved = resolveAdapter(provider, retention, route.providerName);
@@ -478,6 +482,7 @@ export async function prepareResponsesTransport(
     }
     return resolved;
   };
+  /** Rebuild a stale queued selection while retaining the caller's dispatch lease and renewing Auto metadata. */
   const refreshDispatchAdapter = async (requestParsed: OcxParsedRequest): Promise<ProviderAdapter> => {
     if (route.provider.authMode === "oauth") {
       // Pacing may outlive admission. Preserve local pause/cooldown reasons even when
@@ -558,6 +563,7 @@ export async function prepareResponsesTransport(
     }
     throw new Error("Account selection changed repeatedly before turn dispatch");
   };
+  /** Fence the physical send, with bounded credential/session rebuilds and safe negotiated refusals. */
   const oauthDispatch = (wireRequest: AdapterRequest, requestParsed = parsed): ProviderFetchOptions["dispatchOverride"] => {
     if (route.provider.authMode === "forward") return undefined;
     return async (input, init, execute) => {
@@ -1058,6 +1064,7 @@ export async function prepareResponsesTransport(
     selectionIsCurrent,
     resolveSelectionAdapter,
     resolveCopilotSelection,
+    copilotRefusalResponse,
     refreshRunTurnAdapter,
     oauthDispatch,
     noteRoutedAttemptSend,

@@ -152,7 +152,8 @@ export function createAdapterContinuations(
   /**
    * One bounded internal re-ask for Anthropic end_turn-without-tool-call turns. Replays the
    * continuation on a 429 with the same-key retry budget (hoisted per request), then falls
-   * back to key/account failover; a failure becomes an in-stream adapter error so the client
+   * back to key/account failover, rebuilding Copilot model, wire, and credential negotiation.
+   * A failure becomes an in-stream adapter error so the client
    * never sees a second hidden HTTP response or an unbounded retry loop.
    */
   const fetchTerminalGuardContinuation = async function* (

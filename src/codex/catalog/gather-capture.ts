@@ -523,6 +523,7 @@ export function materializeCapturedHeaders(
   ]));
 }
 
+/** Include persisted catalog-shaping settings so different Copilot modes never share a gather flight. */
 function providerCatalogFingerprint(name: string, prov: OcxProviderConfig): Record<string, unknown> {
   return {
     n: name,
