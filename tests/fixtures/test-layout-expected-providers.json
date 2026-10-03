@@ -1,7 +1,4 @@
 {
-  "github-copilot-auto.test.ts": "providers/github-copilot",
-  "github-copilot-auto-runtime.test.ts": "providers/github-copilot",
-  "github-copilot-catalog-hints.test.ts": "providers/github-copilot",
   "provider-antigravity-wire-snapshot.test.ts": "providers",
   "provider-antigravity-effort-families.test.ts": "providers",
   "provider-antigravity-family-catalog.test.ts": "providers",
@@ -14,8 +11,6 @@
   "kiro-quota-metrics.test.ts": "providers/kiro",
   "deepseek-artifact-tool-schema.test.ts": "providers",
   "coding-agent-json-lines-scaling.test.ts": "providers",
-  "provider-egress-outbound.test.ts": "providers",
-  "stepfun-provider.test.ts": "providers",
   "zed-hosted-provider.test.ts": "providers",
   "alibaba-region-backup.test.ts": "providers",
   "alibaba-region-migration.test.ts": "providers",
@@ -274,6 +269,7 @@
   "provider-connection-test.test.ts": "providers",
   "provider-cost-overlay-config.test.ts": "providers",
   "provider-discovery-log-suppression.test.ts": "providers",
+  "provider-egress-outbound.test.ts": "providers",
   "provider-id-rewrite.test.ts": "providers",
   "provider-key-store.test.ts": "providers",
   "provider-live-models.test.ts": "providers",
@@ -296,6 +292,7 @@
   "resolved-model-policy.test.ts": "providers",
   "sambanova-nebius-provider.test.ts": "providers",
   "sponsor-presets.test.ts": "providers",
+  "stepfun-provider.test.ts": "providers",
   "umans-provider.test.ts": "providers",
   "upstream-transient-retry.test.ts": "providers",
   "vercel-gateway-provider-routing.test.ts": "providers",
@@ -319,5 +316,8 @@
   "command-code-tool-text-prose-split.test.ts": "providers",
   "grok-47-build-fast-metadata.test.ts": "providers/xai",
   "grok-47-fast-model.test.ts": "providers/xai",
-  "grok-47-fast-model-wire.test.ts": "providers/xai"
+  "grok-47-fast-model-wire.test.ts": "providers/xai",
+  "github-copilot-auto.test.ts": "providers/github-copilot",
+  "github-copilot-auto-runtime.test.ts": "providers/github-copilot",
+  "github-copilot-catalog-hints.test.ts": "providers/github-copilot"
 }

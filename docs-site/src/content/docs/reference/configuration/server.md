@@ -79,6 +79,12 @@ refusal as rate-limit or quota evidence against the credential it was holding. T
 requests such as vision and web search are replayed normally, because repeating them cannot
 duplicate a turn.
 
+Native ChatGPT Responses and compact HTTP requests whose serialized JSON strings are at least
+1 MiB in UTF-8 use byte-buffer uploads to avoid Bun resetting a large string upload before response
+headers arrive. This preserves the request
+contents and does not enable automatic retries. A genuine connection reset still follows the
+replay-refusal policy above.
+
 A native Responses provider can opt into replacing that send with
 [`retryOnReset`](/reference/configuration/providers/#provider-entries-ocxproviderconfig). The same grant covers the
 case where the connection survives the header and the SSE body then dies carrying only control
