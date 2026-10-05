@@ -18,6 +18,7 @@ import { DEVIN_DEFAULT_API_SERVER, resolveDevinApiServer } from "../oauth/devin"
 import { devinAssistantReasoning, encodeDevinSignature, hasAnthropicSignature } from "./devin/reasoning-signature";
 import { SendBudgetExhaustedError } from "../lib/upstream-retry";
 import { devinContextOverflowEvent, isDevinHistoryOverflow } from "./devin/context-overflow";
+import { claimDevinTrajectory, type DevinTrajectoryClaim } from "./devin/trajectory";
 
 /**
  * Combine two usage frames from one turn by keeping the larger count per field.
@@ -522,9 +523,30 @@ export function mapOcxMessagesToDevin(
     .join("\n\n");
   if (system) items.push({ role: "system", content: system });
 
+  let previousToolResult: ChatHistoryItem | undefined;
   for (const message of parsed.context.messages) {
+    // Original-message adjacency matters even when an intervening message maps to nothing.
+    if (message.role !== "toolResult") previousToolResult = undefined;
     const mapped = mapOneMessage(message, parsed.modelId, options);
-    if (mapped) items.push(mapped);
+    if (!mapped) continue;
+    if (mapped.role === "tool") {
+      if (previousToolResult && previousToolResult.tool_call_id === mapped.tool_call_id) {
+        const previous = previousToolResult;
+        previous.content = typeof previous.content === "string" && typeof mapped.content === "string"
+          ? `${previous.content}\n\n${mapped.content}`
+          : [
+              ...(typeof previous.content === "string"
+                ? [{ type: "text" as const, text: previous.content }] : previous.content),
+              { type: "text", text: "\n\n" },
+              ...(typeof mapped.content === "string"
+                ? [{ type: "text" as const, text: mapped.content }] : mapped.content),
+            ];
+        if (mapped.is_error) previous.is_error = true;
+        continue;
+      }
+      previousToolResult = mapped;
+    }
+    items.push(mapped);
   }
   return items;
 }
@@ -743,6 +765,7 @@ export function createDevinAdapter(
       let contextWindow: number | undefined;
       let messages: ChatHistoryItem[] = [];
       let tools: ToolDef[] | undefined;
+      let trajectory: DevinTrajectoryClaim | undefined;
 
       const closeOpenTool = () => {
         if (!openToolId) return;
@@ -751,6 +774,14 @@ export function createDevinAdapter(
       };
 
       try {
+        const ownThreadId = incoming.headers.get("thread-id")?.trim() || parsed._codexOwnThreadId?.trim();
+        const conversation = ownThreadId
+          || incoming.headers.get("session_id")?.trim() || incoming.headers.get("session-id")?.trim()
+          || incoming.headers.get("x-session-affinity")?.trim()
+          || (!incoming.headers.has("x-codex-parent-thread-id") ? parsed._clientThreadId : undefined);
+        trajectory = claimDevinTrajectory(apiKey, host, conversation,
+          ownThreadId ? incoming.headers.get("x-codex-parent-thread-id")?.trim() || undefined : undefined);
+        const trajectoryId = trajectory.trajectoryId;
         // Read the selected UID's catalog row, not the picker's collapsed base.
         contextWindow = resolveDevinContextWindow(provider, modelUid, catalog?.byUid.get(modelUid));
         messages = mapOcxMessagesToDevin(parsed);
@@ -780,6 +811,7 @@ export function createDevinAdapter(
           messages,
           tools,
           cascadeId,
+          trajectoryId,
           completionOpts: {
             ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
             ...(typeof parsed.options.temperature === "number" ? { temperature: parsed.options.temperature } : {}),
@@ -961,6 +993,8 @@ export function createDevinAdapter(
           ...(error instanceof CloudChatError && error.code ? { code: error.code } : {}),
           ...(usage ? { usage } : {}),
         });
+      } finally {
+        trajectory?.release();
       }
     },
   };

@@ -198,10 +198,22 @@ The User-Agent is a routing hint, not a trust boundary: a client that fakes it r
 any local process already reaches (the `api.anthropic.com` intercept is on the Claude Code proxy
 too; the `claude.ai` relay verifies upstream and adds no credential) and breaks only its own TLS,
 because each terminator presents a certificate only its intended client trusts. `claude.ai:443` is
-terminated by a `node:https` HTTP/1.1 relay (`picker-listener.ts`) only while the runtime's cached
+intercepted only while the runtime's cached
 decision is armed: macOS, persisted resolved Desktop mode first-party, Desktop intent on,
 `claudeCode.intercept.picker !== false`, no disarm latch, listener up, and the current picker CA
-trusted in the login keychain (`picker-trust.ts`). The picker CA (`picker-ca.ts`) carries critical
+trusted in the login keychain (`picker-trust.ts`). A loopback TCP front in `picker-listener.ts`
+reads ClientHello ALPN through `src/claude/intercept/client-hello.ts`, reassembling across TCP
+splits and up to 16 TLS records within 64 KiB of wire bytes and a 10-second deadline. It splices
+the untouched connection to an HTTP/2 server when the client offers `h2`, or to the native
+`node:https` HTTP/1.1 relay otherwise. WebSocket connections use the latter: extended CONNECT
+is not enabled, so Chromium opens them over HTTP/1.1. HTTP/2 multiplexing avoids the connection
+starvation reported in #6511, where SSE subscriptions held Chromium's six per-origin HTTP/1.1
+connections and later requests queued before reaching the listener. Upstream remains one
+HTTP/1.1 request per client request. Incoming requests and ordinary upstream responses retain
+a 64 KiB header allowance for browser session cookies; Bun enforces the HTTP/2 inbound bound
+natively, counting name + value + 32 bytes per field and rejecting an oversized stream with
+`RST_STREAM ENHANCE_YOUR_CALM` before the request handler runs.
+The picker CA (`picker-ca.ts`) carries critical
 name constraints permitting only `claude.ai` and excluding every IPv4 and IPv6 address. Its signing
 key exists only in the server process; only public certificates are written under
 `<OPENCODEX_HOME>/claude-picker/`. Every unbound intercept startup attempt makes a best-effort cleanup of legacy `ca.key` before eligibility checks, including client role, disabled routing/interception, and ephemeral public ports; cleanup failures do not block startup. See the [runtime lifecycle contract](../runtime.md#claude-intercept-pair). On restart the lifecycle keeps the applied
@@ -242,8 +254,12 @@ remote `ccr` (`picker-bootstrap.ts`), failing open to the original bytes; the mo
 comes from a persisted snapshot (`picker-models.ts`), so a bootstrap never waits on discovery. Picker aliases carry `[1m]` only for authoritative windows of at least 1M, using the shared context marker helper with auto-context disabled. Sub-million opt-ins remain unmarked because the picker cannot guarantee the Desktop runner's compaction environment. A
 CONNECT to claude.ai that arrives before the first refresh waits at most 3 s, then goes blind. A
 picker proxy bind failure only disables picker mode; a picker construction or start failure closes
-every socket the start had bound before rethrowing. Nothing is logged but method, bootstrap or
-other, and status.
+every socket the start had bound before rethrowing. Ordinary session cookies within the header
+allowance relay unchanged. Upstream header overflow returns an empty 502 and logs the fixed
+reason `upstream:headers-too-large`; other records contain only method, bootstrap or other,
+status, and fixed bootstrap rewrite outcomes. Header values and request paths are not logged.
+Upgraded connections retain raw TLS relay semantics; their upstream bytes do not pass through
+the ordinary HTTP response parser.
 
 ### Picker catalog rewrite bounds
 
@@ -403,6 +419,8 @@ data-token ownership, so displaying configuration cannot enter Desktop or client
 
 ## Claude Desktop config-library resolution
 
+`src/cli/claude-desktop-profile.ts` provides explicit runtime profile show/import through GET/PUT `/api/claude-desktop`. Bounded JSON input uses the canonical profile validator and the server retains unavailable-model, applied-marker and concurrent-save guards. Import saves desired state only; existing local show/import/apply commands retain their separate targets. The profile branch is dispatched before apply-mode aliases and never falls back to a local write.
+
 The Desktop profile writer and the management status probe share
 `resolveDesktop3pConfigLibraryPath`. The resolver reproduces Desktop's own rule rather than a guess:
 an explicit `CLAUDE_USER_DATA_DIR` (or the opencodex override) wins; on Windows
@@ -486,6 +504,8 @@ The [compaction routing override](../transports/responses-failover.md#compaction
 ## Routed bundled-skill text
 
 `src/claude/inbound.ts` bounds the text-carrier skill-directory probe to 4,096 UTF-16 code units, plus one character to recognize the terminating newline. A longer first line is preserved intact instead of being scanned or stubbed; normal POSIX, Windows, mixed and UNC separators retain their basename matching. The existing 10,000-character payload threshold and `claudeCode.blockedSkills` policy remain: `claude-api` is blocked by default, and an explicit empty list disables elision. Native Anthropic passthrough and tool-call/result pairing are unchanged. `tests/claude-integration/claude-inbound.test.ts` covers the exact 4,096/4,097 boundary and a long newline-free carrier.
+
+`src/claude/inbound-content-options.ts` strips Claude Code's leading `x-anthropic-billing-header:` line from a string system prompt or from the first text block of a system array before it becomes Responses `instructions`, dropping a block left empty. The line's `cch` value rotates per request, so keeping it made the translated prefix and the system-derived fallback `prompt_cache_key` change every turn (#6627). The match is anchored at the prompt start, like the Antigravity strip in `src/adapters/google.ts`; native Anthropic passthrough does not use this translation and keeps the client preamble. `tests/claude-integration/claude-inbound.test.ts` covers string and array systems, header-only blocks, later mentions and key stability.
 
 ## Claude Code picker descriptions
 
