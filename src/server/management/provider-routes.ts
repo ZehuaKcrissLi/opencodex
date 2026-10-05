@@ -935,9 +935,9 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
       ]),
     ));
   }
-
   if (url.pathname === "/api/providers" && req.method === "GET") {
-    return jsonResponse(Object.entries(config.providers).map(([name, p]) => ({
+    return jsonResponse(Object.entries(config.providers).map(/** Expose editable provider settings and credential-presence flags without returning stored credential values. */
+      ([name, p]) => ({
       name, adapter: p.adapter, baseUrl: publicProviderBaseUrl(p.baseUrl), defaultModel: p.defaultModel, hasApiKey: !!p.apiKey,
       // Presence only (#959 review): header names and values never leave the process.
       hasHeaders: !!p.headers && Object.keys(p.headers).length > 0,

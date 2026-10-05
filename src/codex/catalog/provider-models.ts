@@ -285,7 +285,8 @@ export async function fetchProviderModelsWithAuth(
       ? resolveCopilotApiBaseUrl(auth.oauthApiBaseUrl) : undefined);
     try {
       const models = await fetchCopilotAutoModels(transport, AbortSignal.timeout(8_000), undefined, ttlMs);
-      const picker = copilotPickerModels(prov, models).map(model => applyProviderConfigHints(name, prov, {
+      const picker = copilotPickerModels(prov, models).map(/** Apply configured hints to the permission-filtered account catalog without changing upstream metadata. */
+        model => applyProviderConfigHints(name, prov, {
         id: model.id, provider: name,
         ...catalogHintsFromModelsApiItem(name, model as ProviderModelsApiItem),
       }, contextCap, metadataModelIdCaseFold, captured.effectiveAlias));

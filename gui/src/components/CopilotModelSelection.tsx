@@ -12,7 +12,8 @@ export function CopilotModelSelection({ value, onChange, disabled }: {
   return (
     <label className="pwi-settings-field">
       <span className="pwi-settings-label">{t("pws.copilotSelection")}</span>
-      <select className="input" value={value} disabled={disabled} onChange={e => onChange(e.target.value as CopilotSelection)}>
+      <select className="input" value={value} disabled={disabled} onChange={/** Forward the selected mode to the owner; this control does not persist provider settings. */
+        e => onChange(e.target.value as CopilotSelection)}>
         <option value="detect">{t("pws.copilotSelectionDetect")}</option>
         <option value="auto">{t("pws.copilotSelectionAuto")}</option>
         <option value="manual">{t("pws.copilotSelectionManual")}</option>

@@ -8,7 +8,7 @@ import AddProviderModal from "../src/components/AddProviderModal";
 import { useAddProviderOAuth } from "../src/components/use-add-provider-oauth";
 
 const globals = ["document", "window", "navigator", "localStorage", "IS_REACT_ACT_ENVIRONMENT"] as const;
-let previous: unknown[];
+let previous: Array<PropertyDescriptor | undefined>;
 let win: Window;
 let host: HTMLElement;
 let root: Root;
@@ -22,12 +22,12 @@ let finishPatch: (() => void) | undefined;
 const preset = { id: "github-copilot", label: "GitHub Copilot", adapter: "openai-chat", baseUrl: "https://api.githubcopilot.com", auth: "oauth", oauthProvider: "github-copilot" };
 
 beforeEach(() => {
-  previous = globals.map(key => Reflect.get(globalThis, key));
+  previous = globals.map(key => Object.getOwnPropertyDescriptor(globalThis, key));
   oldFetch = globalThis.fetch;
   win = new Window({ url: "http://localhost/" });
   Object.defineProperty(win.navigator, "language", { value: "en-US", configurable: true });
   for (const [key, value] of Object.entries({ document: win.document, window: win, navigator: win.navigator, localStorage: win.localStorage, IS_REACT_ACT_ENVIRONMENT: true }))
-    Object.defineProperty(globalThis, key, { value, configurable: true });
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   host = win.document.createElement("div") as unknown as HTMLElement;
   win.document.body.appendChild(host as never);
   cancelled = 0; patches = []; finishStatus = undefined; patchFailure = undefined; holdPatch = false; finishPatch = undefined;
@@ -50,23 +50,32 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => { root.unmount(); });
   globalThis.fetch = oldFetch;
-  globals.forEach((key, index) => Object.defineProperty(globalThis, key, { value: previous[index], configurable: true }));
+  globals.forEach((key, index) => {
+    const descriptor = previous[index];
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else Reflect.deleteProperty(globalThis, key);
+  });
   await win.happyDOM.close();
 });
+/** Mount the real hook or modal under its language context so completion follows committed React renders. */
 async function mount(node: React.ReactNode) {
   const { createRoot } = await import("react-dom/client");
   await act(async () => { root = createRoot(host); root.render(<LanguageProvider>{node}</LanguageProvider>); });
 }
+/** Activate a rendered button inside act so state changes settle before the next OAuth assertion. */
 async function click(fragment: string) {
   const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(node => node.textContent?.includes(fragment));
   expect(button).toBeTruthy();
   await act(async () => { button!.click(); });
 }
+/** Wait for the real polling interval and require a pending status response before completing login. */
 async function waitForPoll() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 2100)); });
   expect(finishStatus).toBeDefined();
 }
+/** Release the pending successful status response and flush the completion microtask inside act. */
 async function finish() { await act(async () => { finishStatus!(); await Promise.resolve(); }); }
+/** Expose hook busy and status state while allowing tests to replace the completion callback between renders. */
 function Harness({ complete }: { complete: (name: string) => Promise<void> }) {
   const t = useT(); const aliveRef = useRef(true);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");

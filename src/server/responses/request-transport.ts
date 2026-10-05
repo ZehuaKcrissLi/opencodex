@@ -266,7 +266,8 @@ export async function prepareResponsesTransport(
         ? { kind: "oauth", selection: { ...oauthSelection }, snapshot: servingOAuthSnapshot }
         : { kind: "api-key", provider: { ...route.provider } };
       return resolveCopilotAuto(route.provider, copilotRequestedModel, requestParsed,
-        options.abortSignal ?? req.signal, () => selectionIsCurrent(binding), !insideDispatch);
+        options.abortSignal ?? req.signal, /** Fence each negotiation send against the captured credential binding before touching the network. */
+          () => selectionIsCurrent(binding), !insideDispatch);
     };
     let selected: Awaited<ReturnType<typeof resolveCopilotAuto>>;
     try { selected = await negotiate(); }
@@ -566,7 +567,7 @@ export async function prepareResponsesTransport(
   /** Fence the physical send, with bounded credential/session rebuilds and safe negotiated refusals. */
   const oauthDispatch = (wireRequest: AdapterRequest, requestParsed = parsed): ProviderFetchOptions["dispatchOverride"] => {
     if (route.provider.authMode === "forward") return undefined;
-    return async (input, init, execute) => {
+    return /** Dispatch with the current binding and session, rebuilding at most three times before returning a safe refusal. */ async (input, init, execute) => {
       let destination = input;
       let dispatchInit = init;
       for (let attempt = 0; attempt < 3; attempt++) {

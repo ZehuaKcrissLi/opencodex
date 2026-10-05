@@ -180,7 +180,8 @@ export function AddProviderFormPane({
       )}
       {preset.id === "github-copilot" && <CopilotModelSelection
         value={form.copilotModelSelection ?? "detect"}
-        onChange={value => onFormChange({ ...form, copilotModelSelection: value })}
+        onChange={/** Update only the pending Copilot routing choice while preserving the other provider fields. */
+          value => onFormChange({ ...form, copilotModelSelection: value })}
         disabled={saving}
       />}
       {!isReservedForward && <AddProviderField label={t("modal.defaultModel")}>

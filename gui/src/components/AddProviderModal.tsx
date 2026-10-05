@@ -115,7 +115,8 @@ export default function AddProviderModal({
     oauthDeviceCode, oauthInstructions, oauthBrowserLaunch,
     manualCode, manualCodeBusy, manualCodeMsg, manualCodeOk, endpointChoice, oauthTosPending,
   } = state;
-  useEffect(() => {
+  useEffect(/** Keep the latest Copilot choice available to OAuth completion without carrying it into another preset. */
+    () => {
     if (preset?.id === "github-copilot") copilotSelectionRef.current = form?.copilotModelSelection;
   }, [form?.copilotModelSelection, preset?.id]);
 
@@ -322,7 +323,8 @@ export default function AddProviderModal({
             <>
             {preset.id === "github-copilot" && <CopilotModelSelection
               value={form.copilotModelSelection ?? "detect"}
-              onChange={value => dispatch({ type: "set-form", form: { ...form, copilotModelSelection: value } })}
+              onChange={/** Store the selected routing mode in the pending form; persistence follows successful authentication. */
+                value => dispatch({ type: "set-form", form: { ...form, copilotModelSelection: value } })}
               disabled={oauthBusy}
             />}
             <AddProviderOAuthPane

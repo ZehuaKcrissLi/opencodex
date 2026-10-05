@@ -29,7 +29,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
 /** Accept a bounded, homogeneous list so malformed pools cannot grant routing eligibility. */
 function strings(value: unknown): string[] {
   return Array.isArray(value) && value.length <= MAX_MODELS
-    && value.every(v => typeof v === "string" && v.length > 0 && v.length <= 256)
+    && value.every(/** Require every pool entry to be a bounded nonempty string before it can authorize model selection. */
+      v => typeof v === "string" && v.length > 0 && v.length <= 256)
     ? value as string[] : [];
 }
 /** Isolate discovery caches by endpoint and credential without storing plaintext cache keys. */
@@ -58,7 +59,8 @@ async function requestJson(provider: OcxProviderConfig, path: string, signal?: A
       : await providerOutboundPost("github-copilot", provider, url, { ...init, body: JSON.stringify(body) }, { beforeSend });
     // Status-only failures: session endpoints can echo secret material in their bodies.
     if (!response.ok) {
-      void response.body?.cancel().catch(() => undefined);
+      void response.body?.cancel().catch(/** Ignore cleanup failures after discarding a refusal body that may contain reflected credentials. */
+        () => undefined);
       const retry = response.headers.get("retry-after");
       throw new CopilotAutoHttpError(response.status, retry && /^\d{1,4}$/.test(retry)
         ? String(Math.max(1, Math.min(3600, Number(retry)))) : undefined);
@@ -83,14 +85,18 @@ async function requestJson(provider: OcxProviderConfig, path: string, signal?: A
 export function copilotRequiresAuto(provider: OcxProviderConfig, models: CopilotModel[]): boolean {
   if (provider.copilotModelSelection === "auto") return true;
   if (provider.copilotModelSelection === "manual") return false;
-  const permissionKnown = models.some(model => typeof model.model_picker_enabled === "boolean");
-  return permissionKnown && !models.some(model => model.model_picker_enabled === true);
+  const permissionKnown = models.some(/** Distinguish explicit picker permission metadata from legacy inventories that omit permission flags. */
+    model => typeof model.model_picker_enabled === "boolean");
+  return permissionKnown && !models.some(/** Treat any explicitly enabled picker row as permission for named selection in detection mode. */
+    model => model.model_picker_enabled === true);
 }
 /** Project manual-picker permissions; inventory-only accounts expose the synthetic Auto selector. */
 export function copilotPickerModels(provider: OcxProviderConfig, models: CopilotModel[]): CopilotModel[] {
   if (copilotRequiresAuto(provider, models)) return [{ id: "auto" }];
-  const permissionKnown = models.some(model => typeof model.model_picker_enabled === "boolean");
-  return permissionKnown ? models.filter(model => model.model_picker_enabled === true) : models;
+  const permissionKnown = models.some(/** Require a known permission flag before filtering a legacy inventory for manual selection. */
+    model => typeof model.model_picker_enabled === "boolean");
+  return permissionKnown ? models.filter(/** Expose only explicitly selectable rows once the account supplies picker permissions. */
+    model => model.model_picker_enabled === true) : models;
 }
 /** Read the credential-bound catalog; callers may disable caching or reuse an existing lease. */
 export async function fetchCopilotAutoModels(provider: OcxProviderConfig, signal?: AbortSignal,
@@ -101,7 +107,8 @@ export async function fetchCopilotAutoModels(provider: OcxProviderConfig, signal
   const payload = await requestJson(provider, "/models", signal, undefined, undefined, beforeSend, concurrency);
   if (!Array.isArray(payload.data) || payload.data.length > MAX_MODELS)
     throw new Error("GitHub Copilot model discovery returned an invalid catalog");
-  const models = payload.data.flatMap(value => {
+  const models = payload.data.flatMap(/** Discard malformed catalog rows while retaining metadata for bounded model identifiers. */
+    value => {
     const row = record(value);
     if (!row || typeof row.id !== "string" || !row.id || row.id.length > 256) return [];
     return [{ ...row, id: row.id } as CopilotModel];
@@ -146,15 +153,19 @@ export async function resolveCopilotAuto(provider: OcxProviderConfig, requestedM
   const expiresAt = typeof session.expires_at === "number" && Number.isFinite(session.expires_at)
     ? session.expires_at * 1000 : Date.now() + 60_000;
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() + 1000) throw new Error("GitHub Copilot Auto session is already expired");
-  const lastUser = [...parsed.context.messages].reverse().find(message => message.role === "user");
+  const lastUser = [...parsed.context.messages].reverse().find(/** Find the newest user turn as the intent-routing source instead of replaying earlier conversation text. */
+    message => message.role === "user");
   const prompt = lastUser?.role === "user"
-    ? typeof lastUser.content === "string" ? lastUser.content : lastUser.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
+    ? typeof lastUser.content === "string" ? lastUser.content : lastUser.content.flatMap(/** Extract text parts for intent negotiation without forwarding image or other multimodal payloads. */
+      part => part.type === "text" ? [part.text] : []).join("\n")
     : "";
   const intent = await requestJson(transport, "/models/session/intent", signal,
     { prompt: prompt.slice(0, 32_768), available_models: pool }, session.session_token, beforeSend, concurrency);
-  const modelId = strings(intent.candidate_models).find(candidate => pool.includes(candidate));
+  const modelId = strings(intent.candidate_models).find(/** Choose the first server-ranked candidate that belongs to this credential-bound session pool. */
+    candidate => pool.includes(candidate));
   if (!modelId) throw new Error("GitHub Copilot Auto intent returned no eligible model");
-  const endpoints = strings(models.find(model => model.id === modelId)?.supported_endpoints);
+  const endpoints = strings(models.find(/** Read endpoint capabilities for the selected model before choosing its inference adapter. */
+    model => model.id === modelId)?.supported_endpoints);
   const adapter = endpoints.includes("/responses") ? "openai-responses"
     : endpoints.includes("/chat/completions") ? "openai-chat" : undefined;
   if (!adapter) throw new Error("GitHub Copilot Auto selected a model with no supported inference endpoint");

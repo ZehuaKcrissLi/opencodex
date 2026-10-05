@@ -110,8 +110,10 @@ export function applyNewModelPolicy(options: {
       // Copilot Auto is a routing selector needed by Auto-only accounts, not a new upstream
       // model. Upgrading an existing baseline must not hide their only callable route. Explicit
       // operator disables are still honored by visibility consumers and never removed here.
-      ? newIds.filter(id => !(options.provider === "github-copilot" && id === "auto"))
-        .map(id => routedSlug(options.provider, id)) : [],
+      ? newIds.filter(/** Exclude the synthetic Auto selector from newly discovered model disables; explicit disables still apply. */
+        id => !(options.provider === "github-copilot" && id === "auto"))
+        .map(/** Qualify genuine upstream arrivals into provider-scoped disable slugs for the off policy. */
+          id => routedSlug(options.provider, id)) : [],
     arrivals,
     overflow,
   };

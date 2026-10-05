@@ -109,7 +109,8 @@ export default function ProviderSettings({
   const [pacingStatus, setPacingStatus] = useState<PacingStatus | null>(null);
 
   /* eslint-disable react-hooks/set-state-in-effect -- intentional form reset when saved provider fields change */
-  useEffect(() => {
+  useEffect(/** Reset editable fields from the selected provider so unsaved routing choices do not cross providers. */
+    () => {
     setCopilotModelSelection(item.copilotModelSelection ?? "detect");
     setAdapter(item.adapter);
     setBaseUrl(item.baseUrl);
@@ -214,7 +215,8 @@ export default function ProviderSettings({
   useEffect(() => { onDirtyChange?.(formDirty); return () => onDirtyChange?.(false); }, [formDirty, onDirtyChange]);
 
   const copilotAutoOnly = item.name === "github-copilot" && (copilotModelSelection === "auto"
-    || (copilotModelSelection === "detect" && availableModels.length > 0 && availableModels.every(model => model === "auto")));
+    || (copilotModelSelection === "detect" && availableModels.length > 0 && availableModels.every(/** Recognize an Auto-only picker for the permission hint without changing saved model preferences. */
+      model => model === "auto")));
 
   const modelOptions = useMemo(() => {
     const set = new Set(availableModels);

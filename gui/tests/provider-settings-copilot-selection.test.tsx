@@ -8,29 +8,32 @@ import { LanguageProvider } from "../src/i18n/provider";
 import type { WorkspaceItem } from "../src/provider-workspace/catalog";
 
 const globals = ["document", "window", "navigator", "localStorage", "IS_REACT_ACT_ENVIRONMENT"] as const;
-let previousGlobals: Record<(typeof globals)[number], unknown>;
+let previousGlobals: Record<(typeof globals)[number], PropertyDescriptor | undefined>;
 let testWindow: Window;
 
 beforeEach(() => {
-  previousGlobals = Object.fromEntries(globals.map(key => [key, Reflect.get(globalThis, key)])) as typeof previousGlobals;
+  previousGlobals = Object.fromEntries(globals.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)])) as typeof previousGlobals;
   testWindow = new Window({ url: "http://localhost/#providers/workspace" });
   Object.defineProperty(testWindow.navigator, "language", { configurable: true, value: "en-US" });
   Object.defineProperties(globalThis, {
-    document: { configurable: true, value: testWindow.document },
-    window: { configurable: true, value: testWindow },
-    navigator: { configurable: true, value: testWindow.navigator },
-    localStorage: { configurable: true, value: testWindow.localStorage },
+    document: { configurable: true, writable: true, value: testWindow.document },
+    window: { configurable: true, writable: true, value: testWindow },
+    navigator: { configurable: true, writable: true, value: testWindow.navigator },
+    localStorage: { configurable: true, writable: true, value: testWindow.localStorage },
+    IS_REACT_ACT_ENVIRONMENT: { configurable: true, writable: true, value: true },
   });
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
 afterEach(() => {
   testWindow.close();
   for (const key of globals) {
-    Object.defineProperty(globalThis, key, { configurable: true, value: previousGlobals[key] });
+    const descriptor = previousGlobals[key];
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else Reflect.deleteProperty(globalThis, key);
   }
 });
 
+/** Mount real provider settings and capture submitted patches without persisting account configuration. */
 async function mountSettings(item: WorkspaceItem, availableModels: string[] = []): Promise<{
   root: Root;
   container: HTMLElement;
@@ -59,11 +62,13 @@ async function mountSettings(item: WorkspaceItem, availableModels: string[] = []
   return { root, container, patches };
 }
 
+/** Find the routing-mode control by its detection option without depending on translated labels. */
 function selectionSelect(container: HTMLElement): HTMLSelectElement | null {
   return Array.from(container.querySelectorAll<HTMLSelectElement>("select.input"))
     .find(select => Array.from(select.options).some(option => option.value === "detect")) ?? null;
 }
 
+/** Set the native select value and emit a bubbling change event so React observes the chosen routing mode. */
 async function choose(select: HTMLSelectElement, value: "detect" | "auto" | "manual"): Promise<void> {
   await act(async () => {
     Object.getOwnPropertyDescriptor(testWindow.HTMLSelectElement.prototype, "value")!.set!.call(select, value);
@@ -71,6 +76,7 @@ async function choose(select: HTMLSelectElement, value: "detect" | "auto" | "man
   });
 }
 
+/** Activate the settings save control and flush its submitted patch before inspecting preserved preferences. */
 async function save(container: HTMLElement): Promise<void> {
   const button = container.querySelector<HTMLButtonElement>(".pwi-settings-sticky-bar .btn-primary");
   expect(button).toBeTruthy();

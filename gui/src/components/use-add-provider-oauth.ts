@@ -32,7 +32,8 @@ export function useAddProviderOAuth({
   onAdded: (name: string, isCurrent: () => boolean) => void | Promise<void>;
 }) {
   const onAddedRef = useRef(onAdded);
-  useEffect(() => { onAddedRef.current = onAdded; }, [onAdded]);
+  useEffect(/** Publish the latest committed completion handler for polling that outlives the render starting login. */
+    () => { onAddedRef.current = onAdded; }, [onAdded]);
   const loginGenerationRef = useRef(new Map<string, number>());
   const activeProvidersRef = useRef(new Map<string, OAuthLoginSetters>());
 
@@ -145,7 +146,8 @@ export function useAddProviderOAuth({
           setOauthMsg("");
           // Authentication succeeded. A post-login config save is a separate
           // completion step; its failure must not cancel or misreport the login.
-          try { await onAddedRef.current(providerId, () => aliveRef.current && isCurrent()); }
+          try { await onAddedRef.current(providerId, /** Allow post-authentication completion only while the component and this login generation remain current. */
+            () => aliveRef.current && isCurrent()); }
           catch {
             if (aliveRef.current && isCurrent()) {
               setOauthMsgTone("warn");
