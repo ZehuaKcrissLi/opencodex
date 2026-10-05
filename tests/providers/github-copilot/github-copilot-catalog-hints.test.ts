@@ -5,9 +5,12 @@ import { clearModelCache } from "../../../src/codex/model-cache";
 import { clearCopilotAutoModelsForTests, type CopilotModel } from "../../../src/providers/github-copilot-auto";
 import type { OcxProviderConfig } from "../../../src/types";
 
-const auth: ModelsAuthResolver = { kind: "observed", resolve: () => ({ apiKey: "synthetic-catalog-key", observed: true }) };
+const auth: ModelsAuthResolver = { kind: "observed",
+  /** Resolve a synthetic observed catalog credential without consulting the user account store. */
+  resolve: () => ({ apiKey: "synthetic-catalog-key", observed: true }) };
 beforeEach(() => { clearModelCache("github-copilot"); clearCopilotAutoModelsForTests(); });
 
+/** Build a permission-mode catalog fixture with configured hints and retained selectors; expose discovery counts without making real network calls. */
 function fixture(mode: OcxProviderConfig["copilotModelSelection"], rows: CopilotModel[]) {
   let requests = 0;
   const provider: OcxProviderConfig = {
@@ -20,12 +23,14 @@ function fixture(mode: OcxProviderConfig["copilotModelSelection"], rows: Copilot
     modelCapabilities: { auto: { inputModalities: ["text", "image"] }, "live-model": { inputModalities: ["text", "image"] } },
     fetch: (async () => { requests++; return Response.json({ data: rows }); }) as typeof fetch,
   } as OcxProviderConfig;
-  return { provider, requests: () => requests };
+  return { provider, requests: /** Report discovery sends without exposing or resetting fixture state. */ () => requests };
 }
+/** Gather the fixture through auth capture and combo retention with a fixed context cap, exercising the shared catalog path. */
 async function gather(provider: OcxProviderConfig) {
   const captured = captureProviderGather("github-copilot", provider, auth, new Set(["combo-model"]));
   return fetchProviderModelsWithAuth(captured, 60_000, 32_000, auth);
 }
+/** Assert the projected display, context cap, reasoning, and modality hints on a gathered model. */
 function expectHints(model: Awaited<ReturnType<typeof gather>>["models"][number], label: string) {
   expect(model.displayName).toBe(label);
   expect(model.contextWindow).toBe(32_000);

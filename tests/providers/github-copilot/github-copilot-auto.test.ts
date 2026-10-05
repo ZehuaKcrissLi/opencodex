@@ -56,6 +56,7 @@ describe("Copilot Auto permissions and negotiation", () => {
   });
   test("sessions are account-bound, ephemeral, and choose wire from returned endpoint metadata", async () => {
     const calls: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = [];
+    /** Record negotiation headers/bodies and return distinct account pools and endpoint capabilities to expose stale-session reuse. */
     const executor = (async (url, init) => {
       const headers = new Headers(init?.headers);
       const account = headers.get("authorization")?.endsWith("account-b") ? "b" : "a";
@@ -68,6 +69,7 @@ describe("Copilot Auto permissions and negotiation", () => {
       expect(headers.get("copilot-session-token")).toBe(`session-${account}`);
       return Response.json({ candidate_models: ["not-in-session", `model-${account}`] });
     }) as typeof fetch;
+    /** Bind a synthetic account bearer and origin to the shared negotiation executor for account-isolation assertions. */
     const provider = (account: string): OcxProviderConfig => ({ authMode: "oauth", apiKey: `account-${account}`,
       baseUrl: `https://${account}.githubcopilot.com`, fetch: executor } as OcxProviderConfig);
     const a = await resolveCopilotAuto(provider("a"), "stale-model", parsed);
@@ -82,6 +84,7 @@ describe("Copilot Auto permissions and negotiation", () => {
   });
   test("out-of-pool candidates and secret-bearing error bodies never become client errors", async () => {
     let rejectSession = false;
+    /** Alternate a valid session with a secret-bearing refusal while always returning an ineligible intent candidate. */
     const executor = (async (url) => {
       const path = new URL(String(url)).pathname;
       if (path === "/models") return Response.json({ data: [{ id: "eligible", supported_endpoints: ["/responses"] }] });

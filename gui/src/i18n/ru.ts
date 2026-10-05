@@ -8,7 +8,7 @@ export const ru: Record<TKey, string> = {
   "pws.copilotSelectionDetect": "Разрешения аккаунта (автоматически)",
   "pws.copilotSelectionAuto": "Student / Free (только Auto)",
   "pws.copilotSelectionManual": "Другие планы (ручной выбор)",
-  "pws.copilotSelectionHint": "Автоматический режим учитывает разрешения текущего аккаунта. В режиме Auto модель выбирает GitHub, а настройки ручного выбора сохраняются.",
+  "pws.copilotSelectionHint": "Автоматический режим учитывает разрешения текущего аккаунта. В режиме Auto GitHub выбирает модель, а настройки ручного выбора сохраняются.",
 
   "nav.claude": "Claude",
   "claude.pageSub": "Маршрутизация и настройки OpenCodex для Claude Code.",

@@ -33,11 +33,13 @@ afterEach(() => {
   else process.env.OPENCODEX_HOME = previousHome;
   removeTreeWithRetry(home);
 });
+/** Build an Auto Responses request with caller-supplied history, stream mode, and a lookup tool for wire/continuation assertions. */
 function request(input: unknown, stream = true): Request {
   return new Request("http://localhost/v1/responses", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ model: "github-copilot/auto", input, stream,
       tools: [{ type: "function", name: "lookup", parameters: { type: "object", properties: { name: { type: "string" } } } }] }) });
 }
+/** Seed two synthetic OAuth accounts in the test-owned home, select A, and return store IDs for rotation assertions. */
 async function accounts() {
   for (const account of ["a", "b"]) await saveCredential("github-copilot", {
     access: `synthetic-access-${account}`, refresh: `synthetic-refresh-${account}`, expires: Date.now() + 3_600_000,
@@ -49,11 +51,13 @@ async function accounts() {
   await setActiveAccount("github-copilot", a);
   return { a, b };
 }
+/** Return an Auto provider config and send ledger; options drive refusal, expiry, rotation, and tool events through both inference wires. */
 function fixture(options: { rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number; negotiationRefusal?: number; negotiationRefusalAt?: number; alwaysRefuse?: boolean; advanceAfterIntent?: () => void; onSession?: (count: number) => void; malformedSessionAt?: number; negotiationRetryAfter?: string } = {}) {
   const sent: Array<{ host: string; path: string; token: string | null; body: any }> = [];
   let inferenceCount = 0;
   let sessionCount = 0;
   let intentCount = 0;
+  /** Emulate account-bound discovery, renewal, and inference while recording sends and asserting the selected bearer/session/model binding. */
   const executor = (async (url, init) => {
     const destination = new URL(String(url));
     if (destination.hostname === "api.github.com") {
