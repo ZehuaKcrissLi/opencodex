@@ -133,6 +133,8 @@ export async function prepareResponsesTransport(
     || route.providerName === "devin"
   ) && route.provider.authMode === "oauth";
   let sentOAuthSnapshot: OAuthAccessSnapshot | undefined;
+  // One inference-401 replay belongs to this request, even when Auto changes exchange wire.
+  let oauth401ReplayAttempted = false;
   let replayOAuthCredentialSnapshot: Pick<OAuthAccessSnapshot, "accountId" | "generation"> | undefined;
   let anthropicPoolAccountId: string | null = null;
   let anthropicPoolFailovers = 0;
@@ -273,7 +275,7 @@ export async function prepareResponsesTransport(
     try { selected = await negotiate(); }
     catch (error) {
       if (!(error instanceof CopilotAutoHttpError) || error.status !== 401 || copilotNegotiationRefreshed
-        || route.provider.authMode !== "oauth" || !servingOAuthSnapshot) throw error;
+        || oauth401ReplayAttempted || route.provider.authMode !== "oauth" || !servingOAuthSnapshot) throw error;
       copilotNegotiationRefreshed = true;
       const refreshed = await refreshResolvedOAuthSelection(servingOAuthSnapshot);
       route.provider = resolveProviderTransport(route.providerName,
@@ -1007,6 +1009,8 @@ export async function prepareResponsesTransport(
     set genericFailovers(value: typeof genericFailovers) {
       genericFailovers = value;
     },
+    get oauth401ReplayAttempted(): boolean { return oauth401ReplayAttempted; },
+    set oauth401ReplayAttempted(value: boolean) { oauth401ReplayAttempted = value; },
     get adapter(): ProviderAdapter {
       return adapter;
     },

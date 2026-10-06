@@ -164,6 +164,9 @@ import { upstreamErrorMessageFromPayload, ENCRYPTED_FUNCTION_OUTPUT_REJECTION } 
 import { isTransientConsoleGoUploadRejection } from "../../providers/opencode-zen-rate-limit";
 import { planReasoningEffortDowngrade } from "../../providers/reasoning-metadata";
 
+/** Transfer an uncommitted Copilot exchange to the existing translated pipeline without new admission. */
+export interface PassthroughAdapterHandoff { kind: "adapter-handoff" }
+
 /** Prepares and recovers one native Responses exchange before client commitment. */
 export async function preparePassthroughExchange(
   requestContext: Pick<ResponsesRequestContext, "config" | "logCtx" | "options" | "req">,
@@ -191,6 +194,11 @@ export async function preparePassthroughExchange(
     | "oauthDispatch"
     | "resolveSelectionAdapter"
     | "resolveCopilotSelection"
+    | "copilotRefusalResponse"
+    | "oauth401ReplayAttempted"
+    | "activeAdapter"
+    | "runTurnAdapter"
+    | "invalidateSameTargetRequest"
     | "isOAuth401ReplayProvider"
     | "sentOAuthSnapshot"
     | "refreshResolvedOAuthSelection"
@@ -243,6 +251,7 @@ export async function preparePassthroughExchange(
     oauthDispatch,
     resolveSelectionAdapter,
     resolveCopilotSelection,
+    copilotRefusalResponse,
     isOAuth401ReplayProvider,
     refreshResolvedOAuthSelection,
     applyFailoverSnapshot,
@@ -726,7 +735,7 @@ export async function preparePassthroughExchange(
     // consumer's cancel to a signalled fetch, so we pass the signal and relay through relayWithAbort,
     // whose cancel() aborts the upstream — preventing leaked connections (RC2, passthrough path).
     const upstream = new AbortController();
-    linkAbortSignal(upstream, options.abortSignal);
+    const cleanupUpstreamAbort = linkAbortSignal(upstream, options.abortSignal ?? req.signal);
     const connectMs = config.connectTimeoutMs ?? 200_000;
     let upstreamResponse: Response;
     /**
@@ -879,8 +888,9 @@ export async function preparePassthroughExchange(
       );
     };
     const transportFailureResponse = (err: unknown): Response => {
+      cleanupUpstreamAbort();
       upstream.abort();
-      if (options.abortSignal?.aborted) {
+      if (options.abortSignal?.aborted || req.signal.aborted) {
         releaseUpstreamHostAdmission(nativeHostState.lease);
         nativeHostState.lease = null;
         releaseCodexAuthContextProbeLease(admissionState.authCtx);
@@ -896,6 +906,13 @@ export async function preparePassthroughExchange(
         return formatErrorResponse(429, "request_send_budget_exhausted", err.message);
       }
       const refusal = unwrapUpstreamRetryEvidenceError(err);
+      const copilotRefusal = copilotRefusalResponse(refusal);
+      if (copilotRefusal) {
+        releaseUpstreamHostAdmission(nativeHostState.lease);
+        nativeHostState.lease = null;
+        releaseCodexAuthContextProbeLease(admissionState.authCtx);
+        return copilotRefusal;
+      }
       // Pacing may outlive the selected account's admission. No fetch occurred, so do
       // not turn an operator pause into a 502 or charge it to host/account health.
       if (refusal instanceof OAuthAccountPausedError || refusal instanceof OAuthLoginRequiredError || refusal instanceof AnthropicAccountCooldownError) {
@@ -1006,7 +1023,7 @@ export async function preparePassthroughExchange(
     const opaqueBlobRecoveryGuard: OpaqueBlobRecoveryGuard = { attempted: false };
     // At most one reasoning-effort downgrade per request.
     const reasoningEffortDowngradeGuard: { attempted: boolean } = { attempted: false };
-    let oauth401ReplayAttempted = false;
+    let oauth401ReplayAttempted = transportState.oauth401ReplayAttempted;
     let codex401ReplayKind: "main" | "stored" | null = null;
     // Console Go answers a transient 400 "Invalid upload request." for bodies it accepts
     // moments later; at most one byte-identical replay is allowed per request.
@@ -1254,7 +1271,7 @@ export async function preparePassthroughExchange(
       // fault and throw away the credential evidence the client needs.
       && !sendBudgetExhausted(transientSendAttempts())
     ) {
-      oauth401ReplayAttempted = true;
+      oauth401ReplayAttempted = transportState.oauth401ReplayAttempted = true;
       try { void upstreamResponse.body?.cancel().catch(() => {}); } catch { /* already consumed/closed */ }
       let refreshed: OAuthAccessSnapshot;
       try {
@@ -1297,10 +1314,6 @@ export async function preparePassthroughExchange(
         resolveWireProtocolOverride(route.providerName, route.modelId, refreshedProvider, inboundWire, route.staticPolicy),
         config.cacheRetention,
       );
-      if (!("passthrough" in refreshedAdapter) || !refreshedAdapter.passthrough) {
-        upstream.abort();
-        return formatErrorResponse(502, "upstream_error", "OAuth refresh changed the provider wire unexpectedly");
-      }
       bindRouteReasoningReplayScope({
         parsed,
         providerName: route.providerName,
@@ -1316,6 +1329,17 @@ export async function preparePassthroughExchange(
         logCtx.accountLogLabel,
       );
       recordAttemptCredentialSource(logCtx.activeAttempt, route.providerName, route.provider, refreshedAdapter.name);
+      if (!("passthrough" in refreshedAdapter) || !refreshedAdapter.passthrough) {
+        if (route.providerName === "github-copilot" && refreshedAdapter.name === "openai-chat") {
+          cleanupUpstreamAbort();
+          upstream.abort();
+          transportState.adapter = transportState.activeAdapter = transportState.runTurnAdapter = refreshedAdapter;
+          transportState.invalidateSameTargetRequest();
+          return { kind: "adapter-handoff" as const };
+        }
+        upstream.abort();
+        return formatErrorResponse(502, "upstream_error", "OAuth refresh changed the provider wire unexpectedly");
+      }
       try {
         request = await refreshedAdapter.buildRequest(parsed, {
           headers: requestState.selectedForwardHeaders,
@@ -1892,4 +1916,4 @@ export async function preparePassthroughExchange(
   };
 }
 
-export type PassthroughExchange = Exclude<Awaited<ReturnType<typeof preparePassthroughExchange>>, Response>;
+export type PassthroughExchange = Exclude<Awaited<ReturnType<typeof preparePassthroughExchange>>, Response | PassthroughAdapterHandoff>;

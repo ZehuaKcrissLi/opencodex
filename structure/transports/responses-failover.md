@@ -538,10 +538,10 @@ Dashboard Fast-row persistence and client refresh follow the [Fast selector rows
 
 ## Account refusal and rotation boundaries
 
-Copilot Auto replacement negotiation follows the [Copilot Auto failure contract](../providers-and-adapters.md#github-copilot-auto-selection), including abort cleanup, safe status mapping and sidecar refusal preservation. Native Responses uses the existing pre-stream OAuth HTTP-429 account rotation: account quorum and
-cooldown remain in force, while generic OAuth uses the stable snapshot ceiling described below. The
-complete credential/transport/replay identity is refreshed, and usage is attributed to the serving
-account. Single-account installs do not rotate; a missing alternate credential preserves the original
+Copilot Auto replacement and OAuth-refresh negotiation follow the [Copilot Auto failure contract](../providers-and-adapters.md#github-copilot-auto-selection): abort/lease cleanup, safe refusal mapping and sidecar refusal preservation.
+A refreshed Copilot native Responses request may hand off only to the known Chat adapter, retaining its request-owned inference-401 guard and existing admission, translator and send budget without recursive setup.
+Native Responses uses the existing pre-stream OAuth HTTP-429 account rotation: account quorum and cooldown remain in force, while generic OAuth uses the stable snapshot ceiling described below.
+The complete credential/transport/replay identity is refreshed, and usage is attributed to the serving account. Single-account installs do not rotate; a missing alternate credential preserves the original
 error while transient recovery remains available.
 
 Kiro adapter additionally classifies bounded HTTP 400/403/429 refusals before output.

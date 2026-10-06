@@ -133,6 +133,7 @@ export async function prepareAdapterExchange(
     | "transportToken"
     | "oauthDispatch"
     | "imageTierBias"
+    | "oauth401ReplayAttempted"
     | "isOAuth401ReplayProvider"
     | "sentOAuthSnapshot"
     | "refreshResolvedOAuthSelection"
@@ -344,10 +345,11 @@ export async function prepareAdapterExchange(
    * is invisible to it and a missed bump would replay a request built with a stale key.
    */
 
+  const initialRecovery = route.providerName === "github-copilot" && transportState.oauth401ReplayAttempted ? "oauth-401" : undefined;
   let upstreamResponse: Response;
   try {
     if (transportState.activeAdapter.fetchResponse) {
-      transportState.noteRoutedAttemptSend(inputTokenEstimate);
+      transportState.noteRoutedAttemptSend(inputTokenEstimate, initialRecovery);
       upstreamResponse = await withProviderRequestSlot(route.providerName, route.provider, route.modelId, upstream.signal, pacingSlot =>
         transportState.activeAdapter.fetchResponse!(builtInitialRequest, {
           kiroPreferAccountFailover: route.providerName === "kiro" && isGenericOAuthFailoverEnabled(config, "kiro"),
@@ -395,7 +397,7 @@ export async function prepareAdapterExchange(
             if (!compactPrepaid.use()) throw new SendBudgetExhaustedError(safeHostLabel(builtInitialRequest.url));
             compactPrepaidUsed = true;
           }
-          transportState.noteRoutedAttemptSend(inputTokenEstimate, recovery);
+          transportState.noteRoutedAttemptSend(inputTokenEstimate, recovery ?? initialRecovery);
           return fetchWithHeaderTimeout(builtInitialRequest.url, applyUpstreamRecoveryInit({
             method: builtInitialRequest.method,
             headers: builtInitialRequest.headers,
@@ -480,7 +482,7 @@ export async function prepareAdapterExchange(
     // Console Go answers a transient 400 "Invalid upload request." for bodies it accepts
     // moments later; at most one byte-identical replay is allowed per request.
     const consoleGoUploadRetryGuard: { attempted: boolean } = { attempted: false };
-    let oauth401ReplayAttempted = false;
+    let oauth401ReplayAttempted = transportState.oauth401ReplayAttempted;
     let antigravityAuthRotationAttempted = false;
     // At most one reasoning-effort downgrade per request. This sits outside the recovery loop
     // below for the same reason the two guards above do: a guard declared inside it is reset by
@@ -758,7 +760,7 @@ export async function prepareAdapterExchange(
         && !oauth401ReplayAttempted
         && !sendBudgetExhausted()
       ) {
-        oauth401ReplayAttempted = true;
+        oauth401ReplayAttempted = transportState.oauth401ReplayAttempted = true;
         let refreshed: OAuthAccessSnapshot;
         try {
           refreshed = await refreshResolvedOAuthSelection(transportState.sentOAuthSnapshot);

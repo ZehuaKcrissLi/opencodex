@@ -94,7 +94,6 @@ export async function handleComboResponses(
     requestDispatchers,
   );
 }
-
 /** Compose request phases while retaining the original admission-finally ownership. */
 async function handleResponsesInner(
   req: Request,
@@ -124,7 +123,7 @@ async function handleResponsesInner(
     const sendBudgetState = createResponsesSendBudget(requestContext);
     if (sendBudgetState instanceof Response) return sendBudgetState;
     if ("passthrough" in transportState.adapter && transportState.adapter.passthrough && !sidecarState.routedCompaction) {
-      return await executePassthroughResponse(
+      const passthroughResult = await executePassthroughResponse(
         requestContext,
         admissionState,
         requestState,
@@ -133,6 +132,7 @@ async function handleResponsesInner(
         responseEffects,
         sendBudgetState,
       );
+      if (passthroughResult instanceof Response) return passthroughResult;
     }
     const sidecarPlans = await executeResponsesSidecars(
       requestContext,

@@ -79,7 +79,11 @@ describe("Responses core module boundaries", () => {
   test("lease transfer retains both finally owners until response construction settles", () => {
     const ingress = readResponsesCoreModule("core.ts");
     const native = readResponsesCoreModule("passthrough-execution.ts");
-    expect(ingress).toContain("return await executePassthroughResponse(");
+    expect(ingress).toContain("const passthroughResult = await executePassthroughResponse(");
+    expect(ingress).toContain("if (passthroughResult instanceof Response) return passthroughResult;");
+    expect(ingress.indexOf("await executePassthroughResponse("))
+      .toBeLessThan(ingress.indexOf("const sidecarPlans = await executeResponsesSidecars("));
+    expect(native).toContain('if (nativeExchange instanceof Response || nativeExchange.kind === "adapter-handoff") return nativeExchange;');
     // Delivery is awaited inside the try, and its direct body is wrapped before
     // the return. What matters is that both awaits stay inside the lease owner,
     // not that the delivery call is itself the return expression.

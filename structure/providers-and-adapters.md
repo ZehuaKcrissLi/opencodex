@@ -21,16 +21,16 @@ row selects Auto; missing permission evidence retains legacy named routes. Expli
 routes existing named selections through Auto too. Auto-only discovery exposes `auto` without deleting
 saved manual model preferences. The public selector is `github-copilot/auto`. As a routing selector,
 it is exempt from automatic disabling by new-model policy; explicit operator disables still win.
-Before adapter construction, Auto creates an upstream session and resolves intent against the
-captured credential and API origin. The selected model determines Chat versus Responses wire
-and its session token travels only with that request. Sessions are ephemeral, are not saved in
-configuration, and are never shared across account or origin changes. Retries that change
-credentials repeat selection rather than replaying another account's session token.
-Key-pool replacement negotiation stays inside `src/server/responses/adapter-dispatch.ts`'s
-error boundary: cancellation returns 499, safe negotiation refusals retain 401/403/429 and
-validated Retry-After, and other failures return a fixed 502 after upstream abort cleanup.
-The sidecar rotation hook contains a failed replacement negotiation and retains its original
-upstream refusal, matching the existing OAuth sidecar recovery boundary.
+Before adapter construction, Auto creates a session and resolves intent against the captured credential and API origin.
+The selected model determines Chat versus Responses wire; session tokens remain request-local, unsaved, and isolated across accounts and origins.
+Credential-changing retries repeat selection rather than replaying another account's session token.
+A same-account inference-401 refresh can renegotiate Copilot Auto from native Responses to the known `openai-chat` adapter; other unexpected wire changes retain the existing 502.
+The old refusal body is cancelled and its controller unlinked/aborted; native execution releases its host lease before handing off.
+Core then continues the existing adapter/sidecar/delivery pipeline with the same admission, translator, request state and send budget, invalidating the old built request without recursive route or admission setup.
+The inference-401 refresh/replay guard survives the handoff and prevents another refresh from either the Chat replay or its negotiation; initial negotiation retains its independently bounded 401 recovery.
+Key-pool replacement and native OAuth-refresh negotiation share safe refusal projection: cancellation takes precedence as 499; typed 401/403/429 retain their status and validated Retry-After.
+Those failures unlink/abort upstream work and release host/probe leases before returning; other negotiation failures use fixed 502 text without exposing session credentials or refusal bodies.
+The sidecar rotation hook contains failed replacement negotiation and retains its original upstream refusal, matching the existing OAuth sidecar recovery boundary.
 
 GitHub Copilot `modelContextTiers` is selected per upstream model. The Chat and Responses adapters set `contextTier` only when the canonical routed provider is `github-copilot`
 and a tier is configured. Otherwise passthrough retains caller-supplied values. The server carries provider identity
