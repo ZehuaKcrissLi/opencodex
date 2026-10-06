@@ -22,19 +22,15 @@ Selection and persistence semantics: [Anthropic account pause](providers/anthrop
 
 `src/server/management/oauth-account-routes.ts` exposes Anthropic `routes` through both unified `/api/pool/settings` and legacy `/api/oauth/accounts/pool`. Omitted rules survive other setting writes, `null` clears them, and other pool kinds reject supplied rules. The unified DTO declares `routes` supported only for Anthropic and reports null otherwise. Both Anthropic settings GETs validate saved rules before projection: malformed hand edits yield `routes: null` plus `routesError` without changing the stored value; valid and absent rules omit that diagnostic. Config and management responses retain route names; request logs use only the rule’s 1-based `route:#<n>` position. `src/cli/account-extended.ts` reads, replaces and clears these rules with `ocx account routes anthropic`; the server validates content.
 
-The provider management API validates `modelContextTiers` as a strict per-model map,
-merges PATCH entries, and preserves omitted entries on full provider saves. POST re-reads
-the live tier map after destination validation under the config mutation lock, so a concurrent
-PATCH clear is not restored. The CLI uses that API for GitHub Copilot tier edits. The dashboard has no tier control yet.
+The provider management API validates `modelContextTiers` as a strict per-model map, merges PATCH entries, and preserves omitted entries on full provider saves. POST re-reads
+the live tier map after destination validation under the config mutation lock, so a concurrent PATCH clear is not restored. The CLI uses that API for GitHub Copilot tier edits. The dashboard has no tier control yet.
 
 GitHub Copilot Settings exposes `copilotModelSelection`: Account permissions (automatic), Student / Free (Auto only), or Other plans (manual selection). Management writes validate `detect` / `auto` / `manual`, preserve omitted values, and invalidate discovery after a change. Saved manual model preferences remain intact; the effective catalog follows the [Copilot Auto contract](providers-and-adapters.md#github-copilot-auto-selection).
 
 Automatic activation retains its existing settings controls; dashboard quota queries remain independent. See the [quota activation contract](providers/openai-tiers.md#public-provider-contract).
 
-The companion settings contract in `src/companion/` persists menu-bar and widget display
-preferences, while `src/server/management/companion-routes.ts` exposes those settings and the
-usage timeline assembled by `src/usage/timeline.ts` to local clients. Query, filter-echo and
-missing-measurement behavior follows the [companion usage contract](companion.md).
+The companion settings contract in `src/companion/` persists menu-bar and widget display preferences, while `src/server/management/companion-routes.ts` exposes those settings and the
+usage timeline assembled by `src/usage/timeline.ts` to local clients. Query, filter-echo and missing-measurement behavior follows the [companion usage contract](companion.md).
 
 Native result continuations and function-result injection follow [the mode-specific result and control contract](transports/streaming-health.md#experimental-native-function-result-injection); this surface does not infer upstream support or alter its defaults.
 Explicit Codex CLI installation observation is a local CLI surface, not a management API or GUI update permission. See the [read-only observation contract](runtime.md#explicit-codex-cli-installation-observation).
@@ -220,6 +216,12 @@ be treated as implemented:
 - reauthenticate subsequent frames after the handshake.
 
 ## API ownership
+
+`PUT /api/codex-auth/accounts/pause` manually pauses or resumes all existing entries whose account
+and workspace identity is confirmed to match, including native main and a pool duplicate. Its
+`affectedAccountIds` response contains only the existing opaque entry handles; emails and physical
+account ids are not serialized. Absent homes and API-key-only main logins allow Pool-only grouping;
+busy/unreadable main identity returns 503. See [OpenAI account operations](providers/openai-accounts.md#manual-account-pause-and-resume).
 
 Model rows keep stored custom overrides separate from their effective `exportMetadata` projection.
 `src/server/management/model-row-export-metadata.ts` resolves inherited limits and capabilities;
@@ -497,7 +499,7 @@ unvalidated Bun builds is unchanged (`src/lib/bun-stream-caps.ts`).
 
 ## Startup safety
 
-Startup safety credits macOS `desktop` protection only after matching the durable app ownership, enabled and loaded login item, and live app-to-bundled-proxy process relationship. This does not claim an independently installed CLI service. Missing or stale evidence remains at risk. The durable desktop claim remains visible when identity, login registration, or supervision fails; service/shim install and repair controls and their copyable commands stay disabled until ownership changes. Recovery guidance asks the user to reopen OpenCodex and check Start at Login. Compiled startup probes use the standalone-aware self-launch argument builder.
+Startup safety credits macOS and Linux `desktop` protection only after matching the durable app ownership, enabled and loaded login item (Linux: enabled XDG autostart entry), and live app-to-bundled-proxy process relationship. This does not claim an independently installed CLI service. Missing or stale evidence remains at risk. The durable desktop claim remains visible when identity, login registration, or supervision fails; service/shim install and repair controls and their copyable commands stay disabled until ownership changes. Recovery guidance asks the user to reopen OpenCodex and check Start at Login. Compiled startup probes use the standalone-aware self-launch argument builder.
 
 **Startup safety** is reachable by route (`/#startup`) and rendered by the app, but it is not a
 sidebar entry: it is entered from the dashboard's startup-state row, which links there whether the
@@ -566,7 +568,7 @@ retry, last trusted device details, and the existing poll cadence. Outside same-
 ownership, a GET HTTP failure stops polling without starting a second login POST.
 
 Pairing-grant source limiting applies only to invalid guesses from an allowed browser origin; disallowed
-origins record no limiter state, and a valid grant redeems even from a throttled source.
+origins record no limiter state, and a valid grant redeems even from a throttled source. Standalone grant delivery also requires a one-use configuration-write intent; see [Standalone pairing delivery](remote-link.md#standalone-pairing-delivery).
 
 ## Durable provider PATCH
 

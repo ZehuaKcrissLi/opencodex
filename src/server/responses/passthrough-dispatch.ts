@@ -37,7 +37,7 @@ import {
   codexProbeLeaseId,
   codexProbeQuotaScope,
   codexTransientProbeGrant,
-  createCodexReserveDispatchGuard,
+  createCodexAuthDispatchGuard,
 } from "../../codex/auth-context";
 import {
   NamespaceToolCollisionError,
@@ -87,7 +87,6 @@ import {
   fetchWithHeaderTimeout,
   providerFetch,
   safeHostLabel,
-  storedPoolReplayDispatchNotifier,
 } from "./fetch-helpers";
 import { classifyPoolRecoveryDispatch } from "../../routing/probe-lease";
 import { clientCancelledResponse } from "./core-errors";
@@ -818,7 +817,7 @@ export async function preparePassthroughExchange(
             throw new Error("Credential selection changed before pre-output stream recovery");
           }
           if (isCanonicalOpenAiForwardProvider(route.provider)) {
-            createCodexReserveDispatchGuard(
+            createCodexAuthDispatchGuard(
               admissionState.authCtx,
               options.codexAuthPolicy ?? config,
               route.modelId,
@@ -986,7 +985,7 @@ export async function preparePassthroughExchange(
               modelId: route.modelId,
               onCodexWsQuota: codexWsQuotaObserver(admissionState.authCtx, route.provider, route.modelId),
               beforeDispatch: isCanonicalOpenAiForwardProvider(route.provider)
-                ? createCodexReserveDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
+                ? createCodexAuthDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
             }),
             route.provider.authMode === "forward")
             // Every real attempt response — including an intermediate 5xx the
@@ -1091,7 +1090,7 @@ export async function preparePassthroughExchange(
                 modelId: route.modelId,
                 onCodexWsQuota: codexWsQuotaObserver(admissionState.authCtx, route.provider, route.modelId),
                 beforeDispatch: isCanonicalOpenAiForwardProvider(route.provider)
-                  ? createCodexReserveDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
+                  ? createCodexAuthDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
               }),
               route.provider.authMode === "forward")
               .then(adoptObservedResponse);
@@ -1182,13 +1181,13 @@ export async function preparePassthroughExchange(
         // The replay-dispatched signal is what bounds the rest of this logical request, so it
         // has to describe a send that actually happened. fetchWithHeaderTimeout awaits pacing
         // admission BEFORE calling the executor, so signalling at the call site would spend the
-        // budget even when a rejected pacing wait means nothing reaches the network. Wrapping
-        // the executor moves the signal to the last moment before the send, where a throw from
-        // here on is a genuine transport attempt. The notifier is built once for the whole leg:
-        // it fires on the first dispatch, and a replacement is another send of the same replay
-        // rather than a second one to announce.
-        const oauthReplayExecutor = storedPoolReplayDispatchNotifier(
-          providerFetch(route.provider, options.codexWsRuntimeIdentity, {
+        // budget even when a rejected pacing wait means nothing reaches the network. Signal
+        // only after the physical-dispatch policy check succeeds; a local refusal is no send.
+        // A replacement is another send of the same replay, rather than a second announcement.
+        const replayGuard = isCanonicalOpenAiForwardProvider(route.provider)
+          ? createCodexAuthDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined;
+        let replayNotified = false;
+        const oauthReplayExecutor = providerFetch(route.provider, options.codexWsRuntimeIdentity, {
             httpOnly: canonicalBufferedJson,
             nativeControl: nativeResponseControlEligible(route.provider, options.nativeControl) && options.inboundTransport === "websocket" && !options.comboAttempt
               && responseEffects.plaintextV2AgentMessageToolNames.size === 0
@@ -1197,11 +1196,14 @@ export async function preparePassthroughExchange(
             providerName: route.providerName,
             modelId: route.modelId,
             onCodexWsQuota: codexWsQuotaObserver(admissionState.authCtx, route.provider, route.modelId),
-            beforeDispatch: isCanonicalOpenAiForwardProvider(route.provider)
-              ? createCodexReserveDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
-          }),
-          codex401ReplayKind === "stored" ? options.onStoredPool401ReplayDispatched : undefined,
-        );
+            beforeDispatch: headers => {
+              replayGuard?.(headers);
+              if (codex401ReplayKind === "stored" && !replayNotified) {
+                replayNotified = true;
+                options.onStoredPool401ReplayDispatched?.();
+              }
+            },
+          });
         // Routed through the shared helper so an ambiguous reset on THIS leg answers with the
         // same refusal every other leg gives. A bare fetch here rejected instead, and the
         // caller's transport-failure path turns a rejection into a client-retryable 502 --
@@ -1351,7 +1353,7 @@ export async function preparePassthroughExchange(
                 modelId: route.modelId,
                 onCodexWsQuota: codexWsQuotaObserver(admissionState.authCtx, route.provider, route.modelId),
                 beforeDispatch: isCanonicalOpenAiForwardProvider(route.provider)
-                  ? createCodexReserveDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
+                  ? createCodexAuthDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
               }),
               route.provider.authMode === "forward")
               .then(adoptObservedResponse);
@@ -1486,7 +1488,7 @@ export async function preparePassthroughExchange(
                 modelId: route.modelId,
                 onCodexWsQuota: codexWsQuotaObserver(admissionState.authCtx, route.provider, route.modelId),
                 beforeDispatch: isCanonicalOpenAiForwardProvider(route.provider)
-                  ? createCodexReserveDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
+                  ? createCodexAuthDispatchGuard(admissionState.authCtx, options.codexAuthPolicy ?? config, route.modelId, options.admission, options.visionDescribeTerminal === true) : undefined,
               }),
               route.provider.authMode === "forward")
               .then(adoptObservedResponse);
