@@ -24,10 +24,12 @@ import {
   isGenericOAuthFailoverEnabled,
   rotateGenericOAuthAccountOn429,
   rotateGenericOAuthAccountOnRefusal,
+  rotateAntigravityAccountOnAuthRefusal,
   quarantineKiroSuspendedAccount,
   failoverAccountSnapshot,
 } from "../../oauth/generic-account-failover";
 import { classifyKiroRefusal } from "../../adapters/kiro-refusal";
+import { isNonReplayableResponse } from "../../lib/upstream-retry";
 import { noteKiroMonthlyRefusal, noteKiroServedSuccess } from "../../providers/kiro-usage";
 import { persistKiroAccountState } from "../../providers/kiro-account-state-disk";
 import { readDisplaySafeErrorText } from "./core-errors";
@@ -45,6 +47,7 @@ import { recordAdapterReasoning, recordAdapterTier } from "../request-log";
 import { normalizeLogConversationId } from "../request-log-conversation";
 import { rememberResponseState } from "../../responses/state";
 import { trackStreamLifetime } from "../lifecycle";
+import { isAntigravityRawValidationRefusal } from "./antigravity-validation-refusal";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
 export async function executeResponsesSidecars(
@@ -86,9 +89,11 @@ export async function executeResponsesSidecars(
     | "notifyResponseComplete"
     | "cancelResponseCompletion"
   >,
-  sendBudgetState: Pick<ResponsesSendBudget, "reserveCredentialHop">,
+  sendBudgetState: Pick<ResponsesSendBudget, "reserveCredentialHop" | "refundableAdapterDispatchBudget" | "pendingHopPermit" | "noteAdapterPhysicalSend">,
 ) {
   const { config, options, logCtx } = requestContext;
+  const antigravityPoolActivated = requestState.route.providerName === "google-antigravity"
+    && isGenericOAuthFailoverEnabled(config, requestState.route.providerName);
   const {
     applyFailoverSnapshot,
     anthropicSessionKey,
@@ -184,6 +189,9 @@ export async function executeResponsesSidecars(
     || (logCtx.activeAttempt?.deliverySummary?.semanticBytes ?? 0) > 0
     || (logCtx.activeAttempt?.deliverySummary?.sideEffectEvents ?? 0) > 0;
   const noteSidecarOutput = () => { sidecarOutputStarted = true; options.onFirstOutput?.(); };
+  // A single request may rotate once for a verification refusal. Keep this separate from the
+  // broader OAuth failover count: a sidecar turn can also spend that count on rate-limit recovery.
+  let antigravityValidationRotationAttempted = false;
   /** Admit a replacement credential, or leave the loop's original refusal authoritative. */
   const rotateSidecarProviderOn429 = async (
     retryAfter: string | null,
@@ -191,7 +199,20 @@ export async function executeResponsesSidecars(
     retryParsed?: OcxParsedRequest,
     originalResponse?: Response,
   ): Promise<{ adapter: ProviderAdapter; recoveryKind: AttemptRecoveryKind } | null> => {
-    if (route.providerName !== "kiro" && !(route.providerName === "anthropic" && originalResponse?.status === 403) && originalResponse && originalResponse.status !== 429) return null;
+    const antigravityValidationResponse = canRunWebSearch && route.providerName === "google-antigravity"
+      && route.provider.authMode === "oauth" && originalResponse?.status === 403;
+    if (route.providerName !== "kiro" && !(route.providerName === "anthropic" && originalResponse?.status === 403)
+      && !antigravityValidationResponse && originalResponse && originalResponse.status !== 429) return null;
+    let antigravityVerification = false;
+    if (antigravityValidationResponse) {
+      if (transportState.adapter.name !== "google" || !antigravityPoolActivated
+        || options.abortSignal?.aborted || isNonReplayableResponse(originalResponse)
+        || antigravityValidationRotationAttempted
+        || transportState.genericFailovers >= transportState.genericFailoverLimit
+        || sidecarHasCommittedOutput()) return null;
+      antigravityVerification = await isAntigravityRawValidationRefusal(originalResponse, options.abortSignal);
+      if (!antigravityVerification) return null;
+    }
     const refusal = route.providerName === "kiro" && originalResponse
       ? classifyKiroRefusal(originalResponse.status,
         await readDisplaySafeErrorText(originalResponse.clone(), options.abortSignal ?? new AbortController().signal, "")).kind
@@ -208,6 +229,42 @@ export async function executeResponsesSidecars(
     // sidecar loops used to flatten all three to `key-429`, so an account rotation read as a key
     // rotation in the attempt row and in the Logs UI.
     let recoveryKind: AttemptRecoveryKind = "key-429";
+    if (antigravityVerification) {
+      const sent = transportState.replayOAuthCredentialSnapshot;
+      const failedAccountId = transportState.genericFailoverAccountId;
+      if (!sent || !failedAccountId || sent.accountId !== failedAccountId) return null;
+      if (options.abortSignal?.aborted || sidecarHasCommittedOutput()) return null;
+
+      const hop = reserveCredentialHop(
+        "auth-recovery",
+        `${route.providerName}|${route.modelId}|sidecar-oauth-verify`,
+      );
+      if (!hop.allowed) return null;
+      antigravityValidationRotationAttempted = true;
+      const nextAccountId = rotateAntigravityAccountOnAuthRefusal(
+        antigravityPoolActivated, sent.accountId, sent.generation, route.modelId,
+      );
+      if (!nextAccountId) {
+        hop.permit?.release();
+        return null;
+      }
+      try {
+        // Keep the sibling's bearer and its account-matched project together; never inherit the
+        // failed account's identity or project.
+        const snapshot = await failoverAccountSnapshot(route.providerName, nextAccountId);
+        if (options.abortSignal?.aborted || !await applyFailoverSnapshot(snapshot, retryParsed)
+          || transportState.replayOAuthCredentialSnapshot?.accountId !== nextAccountId) {
+          hop.permit?.release();
+          return null;
+        }
+        transportState.genericFailovers += 1;
+      } catch {
+        hop.permit?.release();
+        return null;
+      }
+      recoveryKind = "oauth-account-403";
+      sendBudgetState.pendingHopPermit = hop.permit;
+    }
     const rotated = !originalResponse || originalResponse.status === 429
       ? rotateProviderTransportOn429(config, route.providerName, route.provider, {
       retryAfter,
@@ -215,7 +272,9 @@ export async function executeResponsesSidecars(
       attemptedKey: route.provider.apiKey,
       promptCacheKey: parsed.options.promptCacheKey,
       }) : null;
-    if (rotated) {
+    if (antigravityVerification) {
+      // `applyFailoverSnapshot` has already rebound the route to the sibling identity/project.
+    } else if (rotated) {
       route.provider = rotated;
       try { await resolveCopilotSelection(retryParsed ?? parsed); }
       catch { return null; } // Keep the sidecar's original refusal when replacement negotiation fails.
@@ -230,7 +289,8 @@ export async function executeResponsesSidecars(
     ) {
       // Intersection with the request's shared budget. The sidecar replay is dispatched by the
       // web-search/image loop and never reaches `onSendsConsumed`, so this reservation is the
-      // charge; a refusal returns null and the caller keeps the real 429 it already has.
+      // charge for other sidecars. Antigravity web search hands its reservation to the adapter
+      // physical-send owner instead; a refusal preserves the real 429.
       const hop = reserveCredentialHop(
         "auth-recovery",
         `${route.providerName}|${route.modelId}|sidecar-oauth-429`,
@@ -264,7 +324,8 @@ export async function executeResponsesSidecars(
         return null;
       }
       recoveryKind = "oauth-account-429";
-      hop.permit?.use();
+      if (canRunWebSearch && route.providerName === "google-antigravity") sendBudgetState.pendingHopPermit = hop.permit;
+      else hop.permit?.use();
     } else if (
       // Anthropic's pool is excluded from generic failover, so without this arm a 429 inside a
       // web-search or image-bridge turn was terminal even with the pool fully enabled -- while
@@ -326,6 +387,7 @@ export async function executeResponsesSidecars(
         providerName: route.providerName,
         provider: route.provider,
         adapterName: rotatedAdapter.name,
+        ...(antigravityVerification ? { oauthCredentialSnapshot: transportState.replayOAuthCredentialSnapshot } : {}),
       });
     }
     bindRouteReasoningReplayScope({
@@ -333,6 +395,7 @@ export async function executeResponsesSidecars(
       providerName: route.providerName,
       provider: route.provider,
       adapterName: rotatedAdapter.name,
+      ...(antigravityVerification ? { oauthCredentialSnapshot: transportState.replayOAuthCredentialSnapshot } : {}),
     });
     return { adapter: rotatedAdapter, recoveryKind };
   };
@@ -489,6 +552,11 @@ export async function executeResponsesSidecars(
         abortSignal: options.abortSignal,
         translatorBudget,
         providerFetch: routedProviderFetch,
+        ...(route.providerName === "google-antigravity" ? {
+          sendBudget: sendBudgetState.refundableAdapterDispatchBudget,
+          onPhysicalSend: (send: { ordinal: number; recovery?: AttemptRecoveryKind }) =>
+            sendBudgetState.noteAdapterPhysicalSend(logCtx.usageLogInputTokens, send),
+        } : {}),
       },
       backend: wsPlan.backend,
       forwardProvider: wsPlan.forwardSidecar?.provider,
@@ -521,6 +589,13 @@ export async function executeResponsesSidecars(
       stallTimeoutSec: wsPlan.stallTimeoutSec,
       streamRoutedModelOutput: wsPlan.streamRoutedModelOutput,
       on429: rotateSidecarProviderOn429,
+      ...(route.providerName === "google-antigravity" ? { onIterationEnd: () => {
+        // The next Antigravity adapter dispatch claims this permit. If request construction,
+        // admission or cancellation stopped it first, return the unused send allowance.
+        const permit = sendBudgetState.pendingHopPermit;
+        sendBudgetState.pendingHopPermit = undefined;
+        permit?.release();
+      } } : {}),
       retryOn429Policy: route.providerName === "kiro" && isGenericOAuthFailoverEnabled(config, "kiro")
         ? null : rateLimitRetryPolicyFor(route.provider),
       onCompletedResponse: response => {

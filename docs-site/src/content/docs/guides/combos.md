@@ -488,6 +488,13 @@ target/effort, a coarse decision gate, latency, optional confidence/probability,
 Automated tests use mocked TypeSafe responses plus a no-key fail-open smoke; a live TypeSafe decision
 requires an operator-supplied key and is not run implicitly.
 
+When JEV's selected effort is applied to the Responses child, request and attempt logs show a
+differing effort as `high->xhigh` or `high->low`. Later effort adjustments remain in the chain,
+such as `high->xhigh->medium`. An unchanged effort or a target without effort control keeps the
+existing label; fallback attempts do not inherit the initial JEV effort. With the opt-in
+`protocols.rollout.nativeChatCombos` path, native Chat children currently do not apply JEV's
+selected effort; their labels retain the caller's effort and any native child adjustments instead.
+
 After the Combo has served requests, open **Models → Combos → jev-auto → Stats** to inspect JEV's
 picks without replacing the normal model picker or Usage page. The tab separates backend-reported decision
 tokens from tokens reported by physical model sends, and shows decision gates, fail-open picks,

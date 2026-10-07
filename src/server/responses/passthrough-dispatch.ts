@@ -1023,6 +1023,32 @@ export async function preparePassthroughExchange(
     const opaqueBlobRecoveryGuard: OpaqueBlobRecoveryGuard = { attempted: false };
     // At most one reasoning-effort downgrade per request.
     const reasoningEffortDowngradeGuard: { attempted: boolean } = { attempted: false };
+    /** Rebind the refreshed wire before transferring this request to the Chat pipeline. */
+    const bindRefreshedAdapter = (refreshedAdapter: typeof transportState.adapter) => {
+      bindRouteReasoningReplayScope({
+        parsed,
+        providerName: route.providerName,
+        provider: route.provider,
+        adapterName: refreshedAdapter.name,
+        oauthCredentialSnapshot: transportState.replayOAuthCredentialSnapshot,
+      });
+      logCtx.providerAdapter = refreshedAdapter.name;
+      sealRequestAttemptIdentity(
+        logCtx.activeAttempt,
+        logCtx.provider,
+        refreshedAdapter.name,
+        logCtx.accountLogLabel,
+      );
+      recordAttemptCredentialSource(logCtx.activeAttempt, route.providerName, route.provider, refreshedAdapter.name);
+    };
+    /** Transfer adapter ownership without retaining the native abort link or request cache. */
+    const handoffToChat = (refreshedAdapter: typeof transportState.adapter) => {
+      cleanupUpstreamAbort();
+      upstream.abort();
+      transportState.adapter = transportState.activeAdapter = transportState.runTurnAdapter = refreshedAdapter;
+      transportState.invalidateSameTargetRequest();
+      return { kind: "adapter-handoff" as const };
+    };
     let oauth401ReplayAttempted = transportState.oauth401ReplayAttempted;
     let codex401ReplayKind: "main" | "stored" | null = null;
     // Console Go answers a transient 400 "Invalid upload request." for bodies it accepts
@@ -1314,28 +1340,10 @@ export async function preparePassthroughExchange(
         resolveWireProtocolOverride(route.providerName, route.modelId, refreshedProvider, inboundWire, route.staticPolicy),
         config.cacheRetention,
       );
-      bindRouteReasoningReplayScope({
-        parsed,
-        providerName: route.providerName,
-        provider: refreshedProvider,
-        adapterName: refreshedAdapter.name,
-        oauthCredentialSnapshot: transportState.replayOAuthCredentialSnapshot,
-      });
-      logCtx.providerAdapter = refreshedAdapter.name;
-      sealRequestAttemptIdentity(
-        logCtx.activeAttempt,
-        logCtx.provider,
-        refreshedAdapter.name,
-        logCtx.accountLogLabel,
-      );
-      recordAttemptCredentialSource(logCtx.activeAttempt, route.providerName, route.provider, refreshedAdapter.name);
+      bindRefreshedAdapter(refreshedAdapter);
       if (!("passthrough" in refreshedAdapter) || !refreshedAdapter.passthrough) {
         if (route.providerName === "github-copilot" && refreshedAdapter.name === "openai-chat") {
-          cleanupUpstreamAbort();
-          upstream.abort();
-          transportState.adapter = transportState.activeAdapter = transportState.runTurnAdapter = refreshedAdapter;
-          transportState.invalidateSameTargetRequest();
-          return { kind: "adapter-handoff" as const };
+          return handoffToChat(refreshedAdapter);
         }
         upstream.abort();
         return formatErrorResponse(502, "upstream_error", "OAuth refresh changed the provider wire unexpectedly");
@@ -1413,38 +1421,50 @@ export async function preparePassthroughExchange(
         true,
       );
       if (hop.allowed) {
-        const nextAccountId = rotateGenericOAuthAccountOn429(
-          config, route.providerName, transportState.genericFailoverAccountId,
-          upstreamResponse.headers.get("retry-after"),
-          Date.now(),
-          route.modelId,
-        );
-        let snapshot: OAuthAccessSnapshot | undefined;
-        if (nextAccountId) {
-          try { snapshot = await failoverAccountSnapshot(route.providerName, nextAccountId); }
-          catch { /* Keep the original 429 body readable when the next credential is unavailable. */ }
-        }
-        if (snapshot && await applyFailoverSnapshot(snapshot)) {
-          transportState.genericFailovers += 1;
-          route.provider = resolveProviderTransport(
-            route.providerName, route.provider, parsed.options.promptCacheKey, transportState.sentOAuthSnapshot?.apiBaseUrl,
+        let transferred = false;
+        try {
+          const nextAccountId = rotateGenericOAuthAccountOn429(
+            config, route.providerName, transportState.genericFailoverAccountId,
+            upstreamResponse.headers.get("retry-after"),
+            Date.now(),
+            route.modelId,
           );
-          bindRouteReasoningReplayScope({
-            parsed, providerName: route.providerName, provider: route.provider,
-            adapterName: "openai-responses", oauthCredentialSnapshot: transportState.replayOAuthCredentialSnapshot,
-          });
+          let snapshot: OAuthAccessSnapshot | undefined;
+          if (nextAccountId) {
+            try { snapshot = await failoverAccountSnapshot(route.providerName, nextAccountId); }
+            catch { /* Keep the original 429 body readable when the next credential is unavailable. */ }
+          }
+          if (snapshot && await applyFailoverSnapshot(snapshot)) {
+            transportState.genericFailovers += 1;
+            route.provider = resolveProviderTransport(
+              route.providerName, route.provider, parsed.options.promptCacheKey, transportState.sentOAuthSnapshot?.apiBaseUrl,
+            );
+            const rotatedAdapter = resolveSelectionAdapter(
+              resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire, route.staticPolicy),
+              config.cacheRetention,
+            );
+            bindRefreshedAdapter(rotatedAdapter);
+            try { void upstreamResponse.body?.cancel().catch(() => {}); } catch { /* already closed */ }
+            sendBudgetState.pendingHopPermit = hop.permit;
+            if (route.providerName === "github-copilot" && rotatedAdapter.name === "openai-chat") {
+              transferred = true;
+              return handoffToChat(rotatedAdapter);
+            }
+            const result = await rebuildAndRefetch("oauth-account-429");
+            sendBudgetState.pendingHopPermit = undefined;
+            if ("failed" in result) return result.failed;
+            upstreamResponse = result;
+            continue passthroughRecovery;
+          }
+        } catch (err) {
           try { void upstreamResponse.body?.cancel().catch(() => {}); } catch { /* already closed */ }
-          // The replay IS this hop's send, so the rebuild spends the reservation instead of
-          // asking for one of its own.
-          sendBudgetState.pendingHopPermit = hop.permit;
-          const result = await rebuildAndRefetch("oauth-account-429");
-          sendBudgetState.pendingHopPermit = undefined;
-          if ("failed" in result) return result.failed;
-          upstreamResponse = result;
-          continue passthroughRecovery;
+          return transportFailureResponse(err);
+        } finally {
+          if (!transferred) {
+            if (sendBudgetState.pendingHopPermit === hop.permit) sendBudgetState.pendingHopPermit = undefined;
+            hop.permit?.release();
+          }
         }
-        // No credential moved, so the reservation costs nothing.
-        hop.permit?.release();
       } else {
         // The activation quorum ignores cooldowns; prove that the selector has a live alternate
         // before describing this as a recovery that only the shared request budget withheld.
@@ -1874,6 +1894,7 @@ export async function preparePassthroughExchange(
   const localUpstream = isLocalUpstream(route.provider.baseUrl);
 
   return {
+    kind: undefined,
     codexSafetyBufferingOptions,
     imageGenCallAliases,
     routedCustomToolNames,

@@ -54,7 +54,7 @@ async function accounts() {
   return { a, b };
 }
 /** Return an Auto provider config and send ledger; options drive refusal, expiry, rotation, and tool events through both inference wires. */
-function fixture(options: { nativeFirst?: boolean; closedNativeBody?: boolean; renewedChatRefusal?: boolean; rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number; negotiationRefusal?: number; negotiationRefusalAt?: number; alwaysRefuse?: boolean; advanceAfterIntent?: () => void; onSession?: (count: number) => void; malformedSessionAt?: number; negotiationRetryAfter?: string } = {}) {
+function fixture(options: { nativeFirst?: boolean; native429?: boolean; onNativeCancel?: () => void; chatRefresh?: boolean; closedNativeBody?: boolean; renewedChatRefusal?: boolean; rotate?: boolean; tool?: boolean; key?: boolean; refusal?: number; negotiationRefusal?: number; negotiationRefusalAt?: number; alwaysRefuse?: boolean; advanceAfterIntent?: () => void; onSession?: (count: number) => void; malformedSessionAt?: number; negotiationRetryAfter?: string } = {}) {
   const sent: Array<{ host: string; path: string; token: string | null; body: any; signal?: AbortSignal | null }> = [];
   let inferenceCount = 0;
   let sessionCount = 0;
@@ -72,20 +72,22 @@ function fixture(options: { nativeFirst?: boolean; closedNativeBody?: boolean; r
         endpoints: { api: `https://${refreshedAccount}.githubcopilot.com` } });
     }
     const account = new Headers(init?.headers).get("authorization")?.includes("-b") ? "b" : "a";
-    const model = account === "a" ? "gpt-4o" : "gpt-5.4";
+    const renewed = new Headers(init?.headers).get("authorization")!.includes("-renewed");
+    const model = options.chatRefresh && renewed ? "gpt-5.4" : account === "a" ? "gpt-4o" : "gpt-5.4";
+    const session = `synthetic-session-${account}${options.chatRefresh && renewed ? "-renewed" : ""}`;
     const headers = new Headers(init?.headers);
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     expect(headers.get("authorization")).toStartWith(`Bearer synthetic-access-${account}`);
     sent.push({ host: destination.host, path: destination.pathname, token: headers.get("copilot-session-token"), body, signal: init?.signal });
     if (destination.pathname === "/models") return Response.json({ data: [{ id: model, model_picker_enabled: false,
-      supported_endpoints: [options.nativeFirst ? (headers.get("authorization")!.includes("-renewed") ? "/chat/completions" : "/responses") : account === "a" ? "/chat/completions" : "/responses"] }] });
+      supported_endpoints: [options.native429 ? (account === "a" ? "/responses" : "/chat/completions") : options.chatRefresh ? (renewed ? "/responses" : "/chat/completions") : options.nativeFirst ? (headers.get("authorization")!.includes("-renewed") ? "/chat/completions" : "/responses") : account === "a" ? "/chat/completions" : "/responses"] }] });
     if (destination.pathname === "/models/session") {
       sessionCount++;
       options.onSession?.(sessionCount);
       if (sessionCount === options.malformedSessionAt) return Response.json({ session_token: "must-not-echo" });
       if (options.negotiationRefusal && (sessionCount === (options.negotiationRefusalAt ?? 1) || (options.alwaysRefuse && sessionCount >= (options.negotiationRefusalAt ?? 1)))) return Response.json({ token: "must-not-echo" },
         { status: options.negotiationRefusal, headers: { "retry-after": options.negotiationRetryAfter ?? "12" } });
-      return Response.json({ session_token: `synthetic-session-${account}`, expires_at: Date.now() / 1000 + 10, available_models: [model] });
+      return Response.json({ session_token: session, expires_at: Date.now() / 1000 + 10, available_models: [model] });
     }
     if (destination.pathname === "/models/session/intent") {
       intentCount++;
@@ -93,14 +95,15 @@ function fixture(options: { nativeFirst?: boolean; closedNativeBody?: boolean; r
       return Response.json({ candidate_models: [model] });
     }
     expect(body.model).toBe(model);
-    expect(headers.get("copilot-session-token")).toBe(`synthetic-session-${account}`);
+    expect(headers.get("copilot-session-token")).toBe(session);
     inferenceCount++;
     if (options.nativeFirst && options.closedNativeBody && inferenceCount === 1)
       return Response.json({ error: { message: "native-inference-secret" } }, { status: 401 });
     if (options.nativeFirst && inferenceCount === 1) return new Response(new ReadableStream({
       start(controller) { controller.enqueue(new TextEncoder().encode('{"error":{"message":"native-inference-secret"}}')); },
-      cancel() { cancelledNativeBodies++; },
-    }), { status: 401, headers: { "content-type": "application/json" } });
+      cancel() { cancelledNativeBodies++; options.onNativeCancel?.(); },
+    }), { status: options.native429 ? 429 : 401, headers: { "content-type": "application/json", "retry-after": "1" } });
+    if (options.chatRefresh && inferenceCount === 1) return Response.json({ error: { message: "refresh" } }, { status: 401 });
     if (options.rotate && inferenceCount === 1) return Response.json({ error: { message: "limited" } }, { status: options.refusal ?? 429, headers: { "retry-after": "1" } });
     if (destination.pathname === "/responses") return Response.json({ id: "resp-fixture", model, object: "response", status: "completed",
       output: [{ id: "msg-fixture", type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] }],
@@ -119,7 +122,7 @@ function fixture(options: { nativeFirst?: boolean; closedNativeBody?: boolean; r
     ...(options.key ? { apiKey: "synthetic-access-a", apiKeyPool: [{ id: "a", key: "synthetic-access-a" }, { id: "b", key: "synthetic-access-b" }] } : {}), baseUrl: "https://api.githubcopilot.com", models: ["gpt-4o"],
     defaultModel: "gpt-4o", selectedModels: ["gpt-4o"], copilotModelSelection: "auto", fetch: executor,
   } }, oauthAccountFailover: { enabled: true } } as OcxConfig;
-  if (options.key || options.negotiationRefusal || options.nativeFirst) globalThis.fetch = executor;
+  if (options.key || options.negotiationRefusal || options.nativeFirst || options.chatRefresh) globalThis.fetch = executor;
   return { config, sent, get cancelledNativeBodies() { return cancelledNativeBodies; }, get refreshCount() { return refreshCount; } };
 }
 describe("Copilot Auto through the Responses pipeline", () => {
@@ -231,6 +234,84 @@ describe("Copilot Auto through the Responses pipeline", () => {
     expect(response.status).toBe(499);
     expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path))).toHaveLength(1);
     expect(f.sent.find(call => call.path === "/responses")!.signal!.aborted).toBe(true);
+  });
+  test.each([[false, false], [true, false], [false, true]])("native 429 migrates Responses to Chat stream=%s compaction=%s", async (stream, compaction) => {
+    await accounts();
+    const f = fixture({ nativeFirst: true, native429: true });
+    await saveConfig(f.config);
+    let charges = 0; let refunds = 0;
+    const budget = createRequestExecutionBudget({ maxTotalModelSends: 2, baseSendAllowance: 1, finalRecoveryAllowance: 1, maxAlternateTargetSends: 1, maxTargetTransitions: 1 }, undefined, { charge: () => { charges++; return true; }, refund: () => { refunds++; } });
+    const logCtx: RequestLogContext = { model: "", provider: "" };
+    const response = await handleResponses(request("hello", stream), f.config, logCtx, { sendBudget: budget, compactionRecoveryAttempted: compaction });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("ok");
+    expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path)).map(call => [call.host, call.path]))
+      .toEqual([["a.githubcopilot.com", "/responses"], ["b.githubcopilot.com", "/chat/completions"]]);
+    expect(logCtx.providerAdapter).toBe("openai-chat");
+    expect(budget.used).toBe(2);
+    expect(charges - refunds).toBe(2);
+    expect(f.cancelledNativeBodies).toBe(1);
+  });
+  test("cancelled native handoff refunds its unclaimed hop before adapter dispatch", async () => {
+    await accounts();
+    const controller = new AbortController();
+    const f = fixture({ nativeFirst: true, native429: true, onNativeCancel: () => controller.abort() });
+    await saveConfig(f.config);
+    const budget = createRequestExecutionBudget();
+    const response = await handleResponses(request("hello", false), f.config, { model: "", provider: "" }, { sendBudget: budget, abortSignal: controller.signal });
+    expect(response.status).toBe(499);
+    expect(budget.used).toBe(1);
+    expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path))).toHaveLength(1);
+  });
+  test.each([401, 403, 429])("native 429 replacement refusal %s releases its reserved send", async status => {
+    await accounts();
+    const f = fixture({ nativeFirst: true, native429: true, negotiationRefusal: status, negotiationRefusalAt: 2, alwaysRefuse: true });
+    await saveConfig(f.config);
+    const budget = createRequestExecutionBudget();
+    const response = await handleResponses(request("hello", false), f.config, { model: "", provider: "" }, { sendBudget: budget });
+    expect(response.status).toBe(status);
+    expect(response.headers.get("retry-after")).toBe("12");
+    expect(await response.text()).not.toContain("must-not-echo");
+    expect(budget.used).toBe(1);
+    expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path))).toHaveLength(1);
+    expect(f.sent.find(call => call.path === "/responses")!.signal!.aborted).toBe(true);
+    expect(f.cancelledNativeBodies).toBe(1);
+  });
+  test.each([false, true])("native 429 replacement malformed/cancel=%s refunds the reservation", async cancel => {
+    await accounts();
+    const controller = new AbortController();
+    const f = fixture({ nativeFirst: true, native429: true, malformedSessionAt: cancel ? undefined : 2,
+      onSession: count => { if (cancel && count === 2) controller.abort(); } });
+    await saveConfig(f.config);
+    const budget = createRequestExecutionBudget();
+    const response = await handleResponses(request("hello", false), f.config, { model: "", provider: "" }, { sendBudget: budget, abortSignal: controller.signal });
+    expect(response.status).toBe(cancel ? 499 : 502);
+    expect(await response.text()).not.toContain("must-not-echo");
+    expect(budget.used).toBe(1);
+    expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path))).toHaveLength(1);
+    expect(f.sent.find(call => call.path === "/responses")!.signal!.aborted).toBe(true);
+  });
+  test.each([false, true])("Chat inference 401 negotiates a fresh Responses session stream=%s", async stream => {
+    await accounts();
+    const f = fixture({ chatRefresh: true });
+    const response = await handleResponses(request("hello", stream), f.config, { model: "", provider: "" });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("ok");
+    expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path)).map(call => [call.path, call.body.model, call.token]))
+      .toEqual([["/chat/completions", "gpt-4o", "synthetic-session-a"], ["/responses", "gpt-5.4", "synthetic-session-a-renewed"]]);
+    expect(f.refreshCount).toBe(1);
+    expect(f.sent.filter(call => call.path === "/models/session")).toHaveLength(2);
+  });
+  test.each([401, 403, 429])("Chat 401 replacement negotiation refusal %s is bounded and mapped", async status => {
+    await accounts();
+    const f = fixture({ chatRefresh: true, negotiationRefusal: status, negotiationRefusalAt: 2 });
+    const response = await handleResponses(request("hello", false), f.config, { model: "", provider: "" });
+    expect(response.status).toBe(status);
+    expect(response.headers.get("retry-after")).toBe("12");
+    expect(await response.text()).not.toContain("must-not-echo");
+    expect(f.refreshCount).toBe(1);
+    expect(f.sent.filter(call => ["/responses", "/chat/completions"].includes(call.path))).toHaveLength(1);
+    expect(f.sent.find(call => call.path === "/chat/completions")!.signal!.aborted).toBe(true);
   });
   test("a session that expires while preparing dispatch is renewed without a second concurrency lease", async () => {
     await accounts();

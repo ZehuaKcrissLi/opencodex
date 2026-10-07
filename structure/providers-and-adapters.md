@@ -13,27 +13,22 @@ The Anthropic helper sends share the same routing authority: `getAnthropicSideca
 
 ## GitHub Copilot Auto selection
 
-`src/providers/github-copilot-transport.ts` retains the credential-specific destination and headers.
-Provider `copilotModelSelection` defaults to `detect`; `auto` explicitly selects Auto-only behavior,
-while `manual` retains named-model selection. Detection uses account permissions rather than
-inferring a subscription from model names: boolean `model_picker_enabled` evidence with no true
-row selects Auto; missing permission evidence retains legacy named routes. Explicit `auto` mode
-routes existing named selections through Auto too. Auto-only discovery exposes `auto` without deleting
-saved manual model preferences. The public selector is `github-copilot/auto`. As a routing selector,
-it is exempt from automatic disabling by new-model policy; explicit operator disables still win.
+`src/providers/github-copilot-transport.ts` retains the credential-specific destination and headers. Provider `copilotModelSelection` defaults to `detect`; `auto` explicitly selects Auto-only behavior,
+while `manual` retains named-model selection. Detection uses account permissions rather than inferring a subscription from model names: boolean `model_picker_enabled` evidence with no true
+row selects Auto; missing permission evidence retains legacy named routes. Explicit `auto` mode routes existing named selections through Auto too. Auto-only discovery exposes `auto` without deleting saved manual model preferences. The public selector is `github-copilot/auto`. As a routing selector, it is exempt from automatic disabling by new-model policy; explicit operator disables still win.
 Before adapter construction, Auto creates a session and resolves intent against the captured credential and API origin.
 The selected model determines Chat versus Responses wire; session tokens remain request-local, unsaved, and isolated across accounts and origins.
-Credential-changing retries repeat selection rather than replaying another account's session token.
-A same-account inference-401 refresh can renegotiate Copilot Auto from native Responses to the known `openai-chat` adapter; other unexpected wire changes retain the existing 502.
+Credential-changing retries repeat selection; Chat inference-401 refresh renegotiates with the refreshed credential before rebuilding the selected adapter and session.
+Same-account inference-401 refresh or pre-output OAuth-429 account rotation can move native Copilot Responses to the known `openai-chat` adapter; only that Copilot adapter receives the handoff.
 The old refusal body is cancelled and its controller unlinked/aborted; native execution releases its host lease before handing off.
-Core then continues the existing adapter/sidecar/delivery pipeline with the same admission, translator, request state and send budget, invalidating the old built request without recursive route or admission setup.
-The inference-401 refresh/replay guard survives the handoff and prevents another refresh from either the Chat replay or its negotiation; initial negotiation retains its independently bounded 401 recovery.
-Key-pool replacement and native OAuth-refresh negotiation share safe refusal projection: cancellation takes precedence as 499; typed 401/403/429 retain their status and validated Retry-After.
-Those failures unlink/abort upstream work and release host/probe leases before returning; other negotiation failures use fixed 502 text without exposing session credentials or refusal bodies.
+Core continues the existing adapter/sidecar/delivery pipeline with the same admission, translator, request state and send budget, invalidating the old request without recursive route or admission setup.
+A reserved 429 hop transfers with the request: Chat releases its provisional permit and rebooks an externally counted dispatch at the actual URL/model; the send reporter settles used permits and finally paths refund unused permits, including early sidecar/build exits.
+The inference-401 guard survives handoff, preventing another refresh from either the Chat replay or its negotiation; initial negotiation retains its independently bounded 401 recovery.
+Key-pool replacement, native OAuth-refresh and 429-replacement negotiation share safe refusal projection: cancellation takes precedence as 499; typed 401/403/429 retain their status and validated Retry-After.
+Contained failures unlink/abort upstream work, release host/probe leases and refund untransferred hops; other negotiation failures use fixed 502 text without exposing session credentials or refusal bodies.
 The sidecar rotation hook contains failed replacement negotiation and retains its original upstream refusal, matching the existing OAuth sidecar recovery boundary.
 
-GitHub Copilot `modelContextTiers` is selected per upstream model. The Chat and Responses adapters set `contextTier` only when the canonical routed provider is `github-copilot`
-and a tier is configured. Otherwise passthrough retains caller-supplied values. The server carries provider identity
+GitHub Copilot `modelContextTiers` is selected per upstream model. The Chat and Responses adapters set `contextTier` only when the canonical routed provider is `github-copilot` and a tier is configured. Otherwise passthrough retains caller-supplied values. The server carries provider identity
 through initial builds, retries, continuations, and sidecar builds.
 
 The coding-agent stream parser buffers each tool-use block by its content-block index
@@ -57,7 +52,7 @@ Direct MCP names emitted in a verified custom code-mode catalog follow the
 [Responses restoration boundary](transports/responses-wire-shapes.md#direct-mcp-calls-in-code-mode).
 Ordinary structured functions named `exec` do not opt into this compatibility path.
 
-RunTurn hosted search uses `src/web-search/run-turn-loop.ts`: synthetic calls remain private, progress reaches the bridge during collection, and a validated terminal precedes search execution. Complete search calls remain actionable at a truncated `done`; cancellation prevents subsequent queries and calls. OAuth preflight replay in `src/server/responses/run-turn-execution.ts` retains the synthetic tool while refreshing credential-scoped route state. In `src/server/responses/sidecar-execution.ts`, a search plan takes priority over image/video bridge execution for both transports; only fetch-capable adapters enter the fetch search loop.
+RunTurn hosted search uses `src/web-search/run-turn-loop.ts`: synthetic calls remain private, progress reaches the bridge during collection, and a validated terminal precedes search execution. Complete search calls remain actionable at a truncated `done`; cancellation prevents subsequent queries and calls. OAuth preflight replay in `src/server/responses/run-turn-execution.ts` retains the synthetic tool while refreshing credential-scoped route state. In `src/server/responses/sidecar-execution.ts`, a search plan takes priority over image/video bridge execution for both transports; only fetch-capable adapters enter the fetch search loop. Its Antigravity structured-403 rotation and physical-send accounting follow [Account refusal and rotation boundaries](transports/responses-failover.md#account-refusal-and-rotation-boundaries).
 
 Both search loops keep `web_search` declared after the search budget is exhausted. Further calls receive a paired limit-reached result without another physical search; at most `maxSearches + 3` model iterations run before a terminal error. Ordinary caller tools and cancellation still end the loop. Empty-answer recovery alone removes all tools.
 
@@ -135,10 +130,15 @@ wire type for a known field or a varint longer than ten bytes, keep last-good; a
 with nothing measurable is authoritative-empty. Only Devin's credential host extends its quota
 cache identity; generic OAuth pause still suppresses per-account probes.
 
-Kiro's account quota cache persists quota and an optional exhaustion verdict under one
-opaque account key and a non-secret login identity. Hydration admits only matching live
-accounts and bounds quota and verdict independently by reset and ten-minute TTL; a failed
-probe keeps the same-login last-good display bar. The protected OAuth store rotates
+Kiro AWS SSO token refresh in `src/oauth/kiro.ts` retains HTTP 400 `invalid_request` as refresh-attention evidence separate from terminal grant errors. Matching rotated CLI credentials
+are tried before the failure reaches `src/oauth/index.ts`. `src/oauth/store.ts` persists the failed credential generation under its mutation lock, respecting replacement, config reconciliation,
+and operator pause. Once that generation's access token expires, account summaries project `needsReauth: true` and the active login projects `loggedIn: false`. `src/oauth/health.ts` uses
+the same generation/expiry predicate with its supplied observation time, so account-list health and CLI diagnostics project `reauth_required` with `refresh_failed`; `ocx doctor` warns with a
+login action. The internal terminal flag stays clear so a later refresh remains eligible; successful refresh or credential replacement
+clears the evidence. Desktop input errors, network failures, and 5xx responses create no evidence. No upstream description or credential metadata enters the status response.
+
+Kiro's account quota cache persists quota and an optional exhaustion verdict under one opaque account key and a non-secret login identity. Hydration admits only matching live
+accounts and bounds quota and verdict independently by reset and ten-minute TTL; a failed probe keeps the same-login last-good display bar. The protected OAuth store rotates
 `ProviderAccount.loginId` on every explicit login, preserves it across credential refresh,
 and uses `addedAt` for legacy rows without one.
 

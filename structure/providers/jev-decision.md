@@ -79,9 +79,15 @@ applicable decision, so operators must keep secrets and private paths out of it.
 An absent note leaves the prior decision payload shape intact.
 
 `src/server/responses/core-combo.ts` computes current eligibility, asks JEV once for the initial pick,
-applies the validated effort, and removes caller `service_tier` for that child. A retryable child
-failure re-enters the ordinary Combo fallback loop from the untouched request without another JEV
-call. Each target may carry an optional non-empty `reasoningEfforts` allowlist. Omission keeps the
+applies the validated effort, and removes caller `service_tier` on the Responses child body. The
+opt-in native Chat lane builds a separate body in `src/server/responses/core-combo-native.ts` and
+does not apply that JEV effort override. A retryable child failure re-enters the ordinary Combo
+fallback loop from the untouched request without another JEV call. Request and attempt
+`requestedEffort` labels retain an applied differing JEV effort as `caller->forced`, followed by
+later child transitions; native children omit the unapplied override and preserve their own
+transitions. Absent or unchanged forced efforts keep the existing label.
+`src/server/responses/combo-requested-effort.ts` owns this pure label calculation.
+Each target may carry an optional non-empty `reasoningEfforts` allowlist. Omission keeps the
 backward-compatible all-advertised behavior; a present list is intersected with current capabilities,
 and an empty intersection removes that target from the JEV choice map rather than broadening it.
 Direct models and every other Combo strategy bypass this path. The shared Combo editor owns the GUI

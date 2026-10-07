@@ -156,6 +156,7 @@ export async function prepareAdapterExchange(
   responseEffects: Pick<ResponsesEffects, "cancelResponseCompletion" | "notifyResponseComplete" | "refreshRequestToolAliases">,
   sendBudgetState: Pick<
     ResponsesSendBudget,
+    | "adapterSendBudget"
     | "adapterDispatchBudget"
     | "noteAdapterPhysicalSend"
     | "noteAdapterRecoveryWithheld"
@@ -195,6 +196,7 @@ export async function prepareAdapterExchange(
   } = requestState;
   const { cancelResponseCompletion, notifyResponseComplete, refreshRequestToolAliases } = responseEffects;
   const {
+    adapterSendBudget,
     adapterDispatchBudget,
     noteAdapterPhysicalSend,
     noteAdapterRecoveryWithheld,
@@ -345,8 +347,12 @@ export async function prepareAdapterExchange(
    * is invisible to it and a missed bump would replay a request built with a stale key.
    */
 
-  const initialRecovery = route.providerName === "github-copilot" && transportState.oauth401ReplayAttempted ? "oauth-401" : undefined;
+  const initialRecovery = route.providerName === "github-copilot"
+    ? sendBudgetState.pendingHopPermit?.sendClass === "auth-recovery" ? "oauth-account-429"
+      : transportState.oauth401ReplayAttempted ? "oauth-401" : undefined
+    : undefined;
   let upstreamResponse: Response;
+  let handoffPermit: ResponsesSendBudget["pendingHopPermit"];
   try {
     if (transportState.activeAdapter.fetchResponse) {
       transportState.noteRoutedAttemptSend(inputTokenEstimate, initialRecovery);
@@ -378,7 +384,22 @@ export async function prepareAdapterExchange(
       // legacy direct-Google exception is preserved exactly; every other adapter still keeps
       // reset-only semantics so combo failover hops on the first 5xx.
       const transientPolicy = transientRetryPolicyFor(route.provider);
-      const compactPrepaid = options.compactionRecoveryAttempted ? sendBudgetState.pendingHopPermit : undefined;
+      // Rebook a native Copilot hop against the negotiated destination before dispatch.
+      // Raw externally counted permits settle through the retry helper's send reporter.
+      if (route.providerName === "github-copilot" && adapterSendBudget && sendBudgetState.pendingHopPermit
+        && sendBudgetState.pendingHopPermit.sendClass === "auth-recovery") {
+        const original = sendBudgetState.pendingHopPermit;
+        sendBudgetState.pendingHopPermit = undefined;
+        original.release();
+        const decision = adapterSendBudget.reserveDispatch({
+          sendClass: original.sendClass,
+          targetKey: `${route.providerName}|${builtInitialRequest.url}|${route.modelId}`,
+          countedExternally: true,
+        });
+        if (!decision.allowed) throw new SendBudgetExhaustedError(safeHostLabel(builtInitialRequest.url));
+        handoffPermit = decision.permit;
+      }
+      const compactPrepaid = handoffPermit ?? (options.compactionRecoveryAttempted ? sendBudgetState.pendingHopPermit : undefined);
       if (compactPrepaid) sendBudgetState.pendingHopPermit = undefined;
       let compactPrepaidUsed = false;
       // Combo and emergency compaction admission already book this target's first send.
@@ -459,6 +480,7 @@ export async function prepareAdapterExchange(
     const msg = describeUpstreamConnectFailure(err, connectMs);
     return formatErrorResponse(502, "upstream_error", msg);
   } finally {
+    handoffPermit?.release();
     builtInitialRequest.releaseBodyObservation?.();
   }
 
@@ -831,7 +853,7 @@ export async function prepareAdapterExchange(
         if (route.providerName === "kiro") {
           parsed._kiroAuthContext = { ...(refreshed.kiro ?? {}) };
         }
-        const refreshedProvider = resolveProviderTransport(
+        let refreshedProvider = resolveProviderTransport(
           route.providerName,
           {
             ...route.provider,
@@ -844,6 +866,9 @@ export async function prepareAdapterExchange(
             : undefined,
         );
         route.provider = refreshedProvider;
+        const copilotRefusal = await resolveRotatedCopilotSelection();
+        if (copilotRefusal) return copilotRefusal;
+        refreshedProvider = route.provider;
         invalidateSameTargetRequest();
         transportState.activeAdapter = resolveSelectionAdapter(
           resolveWireProtocolOverride(route.providerName, route.modelId, refreshedProvider, inboundWire, route.staticPolicy),

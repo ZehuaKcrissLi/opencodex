@@ -28,7 +28,6 @@ import { deliverAdapterResponse } from "./adapter-delivery";
 import { releaseUpstreamHostAdmission } from "../../codex/upstream-host-health";
 import { releaseCodexAuthContextProbeLease } from "../../codex/auth-context";
 import { runWithCompactionRecovery } from "./compaction-recovery";
-
 /** Public Responses entry and compatibility exports. Implementations live with their owners. */
 
 /**
@@ -75,7 +74,6 @@ export async function handleResponses(
     throw error;
   }
 }
-
 export async function handleComboResponses(
   req: Request,
   rawBody: unknown,
@@ -106,6 +104,7 @@ async function handleResponsesInner(
     pendingHostAdmissionLease: null,
     authCtx: { kind: "main", accountId: null },
   };
+  let releasePendingSend = () => {};
   try {
     const requestState = await prepareResponsesRequest(requestContext, admissionState, requestDispatchers);
     if (requestState instanceof Response) return requestState;
@@ -133,6 +132,8 @@ async function handleResponsesInner(
         sendBudgetState,
       );
       if (passthroughResult instanceof Response) return passthroughResult;
+      const unclaimedHop = sendBudgetState.pendingHopPermit;
+      releasePendingSend = () => { if (sendBudgetState.pendingHopPermit === unclaimedHop) { unclaimedHop?.release(); sendBudgetState.pendingHopPermit = undefined; } };
     }
     const sidecarPlans = await executeResponsesSidecars(
       requestContext,
@@ -182,15 +183,14 @@ async function handleResponsesInner(
       continuationState,
     );
   } finally {
+    releasePendingSend();
     if (admissionState.pendingHostAdmissionLease) {
       releaseUpstreamHostAdmission(admissionState.pendingHostAdmissionLease);
       releaseCodexAuthContextProbeLease(admissionState.authCtx);
     }
   }
 }
-
 const requestDispatchers: ResponsesDispatchers = { handleResponses, handleComboResponses };
-
 export { adapterNeedsForcedContinuation } from "./core-replay";
 export {
   sidecarOutcomeRecorder, codexLogAccountId, usesCodexForwardPoolAuth, preAuthUpstreamHostCircuitKey,
