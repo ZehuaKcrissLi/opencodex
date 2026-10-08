@@ -1274,14 +1274,13 @@ device-flow login for a short-lived Copilot API token — not a pasted API key. 
 a key/subscription-token gateway on its OpenAI-compatible endpoint. **Cloudflare AI
 Gateway** needs your account + gateway ids filled into the URL.
 
-For Copilot Student or Free accounts, choose **Providers → GitHub Copilot → Settings →
-Model selection → Student / Free (Auto only)**. Discovery supplies `github-copilot/auto`;
-GitHub selects the actual model for each request. The default **Account permissions
-(automatic)** mode uses account evidence; **Other plans (manual selection)** preserves
-named-model selection. Automatic mode requires every row in a nonempty catalog to explicitly deny manual selection before choosing Auto; unknown permissions keep named routes. This setting controls model selection and does not change subscription
-permissions. Ordinary model allowlists, pending/disabled state and new-model policy also apply to Auto visibility.
-If saved selections or policy hide Auto, select or enable the Auto row before using it. Stored manual model preferences return when you switch back to manual mode.
-CLI: `ocx provider edit github-copilot --copilot-model-selection auto`.
+Copilot automatically uses Auto when every valid row in a nonempty account catalog explicitly
+reports that manual selection is unavailable. Missing or malformed permissions retain named routes;
+the picker removes only explicitly denied rows. Auto-only discovery supplies `github-copilot/auto`,
+and GitHub selects the actual model per request. This does not change subscription permissions.
+Ordinary model allowlists, pending/disabled state and new-model policy also apply to Auto visibility.
+If saved selections or policy hide Auto, select or enable the Auto row before using it. Existing
+manual preferences remain saved. A model named `auto` alone does not override account evidence.
 
 Auto follows the session and intent protocol in the public
 [VS Code Copilot Chat implementation](https://github.com/microsoft/vscode-copilot-chat/blob/7b70532a4cbdfa61c2b30fe4ccffda3d89336a4d/src/platform/endpoint/node/automodeService.ts).

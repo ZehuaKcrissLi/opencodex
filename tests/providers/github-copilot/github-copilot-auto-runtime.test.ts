@@ -120,7 +120,7 @@ function fixture(options: { nativeFirst?: boolean; native429?: boolean; onNative
   const config: OcxConfig = { port: 0, defaultProvider: "github-copilot", providers: { "github-copilot": {
     adapter: "openai-chat", authMode: options.key ? "key" : "oauth",
     ...(options.key ? { apiKey: "synthetic-access-a", apiKeyPool: [{ id: "a", key: "synthetic-access-a" }, { id: "b", key: "synthetic-access-b" }] } : {}), baseUrl: "https://api.githubcopilot.com", models: ["gpt-4o"],
-    defaultModel: "gpt-4o", selectedModels: ["gpt-4o"], copilotModelSelection: "auto", fetch: executor,
+    defaultModel: "gpt-4o", selectedModels: ["gpt-4o"], fetch: executor,
   } }, oauthAccountFailover: { enabled: true } } as OcxConfig;
   if (options.key || options.negotiationRefusal || options.nativeFirst || options.chatRefresh) globalThis.fetch = executor;
   return { config, sent, get cancelledNativeBodies() { return cancelledNativeBodies; }, get refreshCount() { return refreshCount; } };
@@ -456,6 +456,7 @@ describe("Copilot Auto through the Responses pipeline", () => {
   });
 
   test("Auto-only catalog retains manual preferences and requires explicit picker selection", async () => {
+    await accounts();
     const { config } = fixture();
     const provider = config.providers["github-copilot"]!;
     const models = await fetchProviderModels("github-copilot", provider, 1000);
@@ -473,6 +474,7 @@ describe("Copilot Auto through the Responses pipeline", () => {
     expect(filterCatalogVisibleModels(models, config)).toEqual([]);
   });
   test("an existing Off-policy baseline disables new Auto until the operator enables it", async () => {
+    await accounts();
     const { config } = fixture();
     delete config.providers["github-copilot"]!.selectedModels;
     config.modelDiscovery = { newModelPolicy: "off", knownModels: {

@@ -6,12 +6,6 @@ import type { TKey } from "./en";
  * Technical terms and model identifiers intentionally remain English.
  */
 export const vi: Record<TKey, string> = {
-  "pws.copilotSelection": "Chọn mô hình Copilot",
-  "pws.copilotSelectionDetect": "Quyền tài khoản (tự động)",
-  "pws.copilotSelectionAuto": "Student / Free (chỉ Auto)",
-  "pws.copilotSelectionManual": "Gói khác (chọn thủ công)",
-  "pws.copilotSelectionHint": "Chế độ tự động tuân theo quyền chọn mô hình của tài khoản đã đăng nhập. Auto để GitHub chọn mô hình và giữ lại tùy chọn thủ công của bạn.",
-
   "nav.claude": "Claude",
   "claude.pageSub": "Định tuyến và cài đặt OpenCodex cho Claude Code.",
 

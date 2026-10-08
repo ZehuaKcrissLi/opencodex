@@ -22,15 +22,17 @@ Selection and persistence semantics: [Anthropic account pause](providers/anthrop
 
 `src/server/management/oauth-account-routes.ts` exposes Anthropic `routes` through both unified `/api/pool/settings` and legacy `/api/oauth/accounts/pool`. Omitted rules survive other setting writes, `null` clears them, and other pool kinds reject supplied rules. The unified DTO declares `routes` supported only for Anthropic and reports null otherwise. Both Anthropic settings GETs validate saved rules before projection: malformed hand edits yield `routes: null` plus `routesError` without changing the stored value; valid and absent rules omit that diagnostic. Config and management responses retain route names; request logs use only the rule’s 1-based `route:#<n>` position. `src/cli/account-extended.ts` reads, replaces and clears these rules with `ocx account routes anthropic`; the server validates content.
 
-The provider management API validates `modelContextTiers` as a strict per-model map, merges PATCH entries, and preserves omitted entries on full provider saves. POST re-reads
-the live tier map after destination validation under the config mutation lock, so a concurrent PATCH clear is not restored. The CLI uses that API for GitHub Copilot tier edits. The dashboard has no tier control yet.
-
-GitHub Copilot Settings exposes `copilotModelSelection`: Account permissions (automatic), Student / Free (Auto only), or Other plans (manual selection). Management writes validate `detect` / `auto` / `manual`, preserve omitted values, and invalidate discovery after a change. Saved manual model preferences remain intact; the effective catalog follows the [Copilot Auto contract](providers-and-adapters.md#github-copilot-auto-selection).
+The provider management API validates `modelContextTiers` as a strict per-model map,
+merges PATCH entries, and preserves omitted entries on full provider saves. POST re-reads
+the live tier map after destination validation under the config mutation lock, so a concurrent
+PATCH clear is not restored. The CLI uses that API for GitHub Copilot tier edits. The dashboard has no tier control yet.
 
 Automatic activation retains its existing settings controls; dashboard quota queries remain independent. See the [quota activation contract](providers/openai-tiers.md#public-provider-contract).
 
-The companion settings contract in `src/companion/` persists menu-bar and widget display preferences, while `src/server/management/companion-routes.ts` exposes those settings and the
-usage timeline assembled by `src/usage/timeline.ts` to local clients. Query, filter-echo and missing-measurement behavior follows the [companion usage contract](companion.md).
+The companion settings contract in `src/companion/` persists menu-bar and widget display
+preferences, while `src/server/management/companion-routes.ts` exposes those settings and the
+usage timeline assembled by `src/usage/timeline.ts` to local clients. Query, filter-echo and
+missing-measurement behavior follows the [companion usage contract](companion.md).
 
 Native result continuations and function-result injection follow [the mode-specific result and control contract](transports/streaming-health.md#experimental-native-function-result-injection); this surface does not infer upstream support or alter its defaults.
 Explicit Codex CLI installation observation is a local CLI surface, not a management API or GUI update permission. See the [read-only observation contract](runtime.md#explicit-codex-cli-installation-observation).
@@ -318,8 +320,6 @@ after the save, and a non-retryable skip (no managed catalog) is a clean save. C
 | Logs | `src/server/management/logs-usage-routes.ts` — `GET /api/logs`, `GET /api/claude/inbound-debug`, and `GET /api/debug/injection-logs` join the debug streams described above. |
 
 ### OAuth login continuations
-
-`gui/src/components/use-add-provider-oauth.ts` treats post-login provider configuration as a separate completion step: a failed save retains the modal and shows a save warning without cancelling successful authentication. Its completion callback is current across polling and validates login generation after saving before notifying the parent; `gui/src/components/AddProviderModal.tsx` retains the Copilot choice by provider so another preset cannot replace it.
 
 `src/server/management/oauth-account-routes.ts` filters `GET /api/oauth/providers` by the
 same server-resolved principal predicate enforced by login start and manual continuation.

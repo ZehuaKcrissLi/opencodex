@@ -523,7 +523,6 @@ export function materializeCapturedHeaders(
   ]));
 }
 
-/** Include persisted catalog-shaping settings so different Copilot modes never share a gather flight. */
 function providerCatalogFingerprint(name: string, prov: OcxProviderConfig): Record<string, unknown> {
   return {
     n: name,
@@ -540,7 +539,6 @@ function providerCatalogFingerprint(name: string, prov: OcxProviderConfig): Reco
     ctx: prov.contextWindow ?? null,
     ctxW: prov.modelContextWindows ?? null,
     ctxTier: prov.modelContextTiers ?? null,
-    copilotModelSelection: prov.copilotModelSelection ?? "detect",
     maxIn: prov.modelMaxInputTokens ?? null,
     maxOut: prov.modelMaxOutputTokens ?? null,
     autoCompact: prov.modelAutoCompactTokenLimits ?? null,

@@ -13,9 +13,8 @@ The Anthropic helper sends share the same routing authority: `getAnthropicSideca
 
 ## GitHub Copilot Auto selection
 
-`src/providers/github-copilot-transport.ts` retains the credential-specific destination and headers. Provider `copilotModelSelection` defaults to `detect`; `auto` explicitly selects Auto-only behavior,
-while `manual` retains named-model selection. Detection requires a nonempty catalog whose every row explicitly has `model_picker_enabled: false`; unknown permissions retain named routes. Manual-capable picker projection removes only explicitly false rows.
-Explicit `auto` mode routes existing named selections through Auto too. Auto-only discovery supplies `github-copilot/auto` without deleting saved manual preferences; ordinary catalog allowlists, pending/disabled state and new-model policy still govern visibility.
+`src/providers/github-copilot-transport.ts` retains the credential-specific destination and headers. Automatic selection requires a nonempty catalog whose every valid row explicitly has `model_picker_enabled: false`; missing or malformed permissions retain named routes. Named picker projection removes only explicitly false rows.
+Auto-only discovery supplies `github-copilot/auto` without deleting saved manual preferences; ordinary catalog allowlists, pending/disabled state and new-model policy still govern visibility. There is no provider mode setting or literal-model override of permission evidence.
 Before adapter construction, Auto creates a session and resolves intent against the captured credential and API origin.
 The selected model determines Chat versus Responses wire; session tokens remain request-local, unsaved, and isolated across accounts and origins.
 Negotiation uses local defensive budgets, not GitHub service limits: 512 catalog/pool/candidate entries, 256 UTF-16 units per identifier, 1 MiB per success body and eight seconds per call including pacing, fetch and body read.

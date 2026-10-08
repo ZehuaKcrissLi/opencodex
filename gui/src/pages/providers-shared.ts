@@ -17,7 +17,6 @@ export interface ProvidersConfig {
     initialModelSelection?: { status: "pending" | "ready" | "all-off"; modelCount?: number };
     note?: string;
     codexAccountMode?: "direct" | "pool";
-  copilotModelSelection?: "detect" | "auto" | "manual";
     xaiResponsesOptInState?: boolean | "mixed";
   }>;
 }

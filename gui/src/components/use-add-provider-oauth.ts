@@ -19,7 +19,6 @@ type OAuthLoginSetters = {
   setManualCodeOk: (v: boolean) => void;
 };
 
-/** Poll authentication with a current completion callback; config-save failure does not revoke a successful login. */
 export function useAddProviderOAuth({
   apiBase,
   t,
@@ -29,11 +28,8 @@ export function useAddProviderOAuth({
   apiBase: string;
   t: TFn;
   aliveRef: React.MutableRefObject<boolean>;
-  onAdded: (name: string, isCurrent: () => boolean) => void | Promise<void>;
+  onAdded: (name: string) => void;
 }) {
-  const onAddedRef = useRef(onAdded);
-  useEffect(/** Publish the latest committed completion handler for polling that outlives the render starting login. */
-    () => { onAddedRef.current = onAdded; }, [onAdded]);
   const loginGenerationRef = useRef(new Map<string, number>());
   const activeProvidersRef = useRef(new Map<string, OAuthLoginSetters>());
 
@@ -83,7 +79,6 @@ export function useAddProviderOAuth({
     setters.setOauthMsg(t("prov.loginCancelled", { provider: providerLabel }));
   }, [aliveRef, bumpLoginGeneration, cancelServerLogin, t]);
 
-  /** Finish successful authentication with the latest config-save callback; save errors retain editable setup. */
   const loginOAuth = useCallback(async (
     providerId: string,
     setters: OAuthLoginSetters,
@@ -144,16 +139,7 @@ export function useAddProviderOAuth({
         if (s?.loggedIn) {
           activeProvidersRef.current.delete(providerId);
           setOauthMsg("");
-          // Authentication succeeded. A post-login config save is a separate
-          // completion step; its failure must not cancel or misreport the login.
-          try { await onAddedRef.current(providerId, /** Allow post-authentication completion only while the component and this login generation remain current. */
-            () => aliveRef.current && isCurrent()); }
-          catch {
-            if (aliveRef.current && isCurrent()) {
-              setOauthMsgTone("warn");
-              setOauthMsg(t("prov.saveFailed"));
-            }
-          }
+          onAdded(providerId);
           return;
         }
         const hint = s?.hint;
@@ -183,7 +169,7 @@ export function useAddProviderOAuth({
         setOauthUrl("", providerId);
       }
     }
-  }, [aliveRef, apiBase, bumpLoginGeneration, cancelServerLogin, t]);
+  }, [aliveRef, apiBase, bumpLoginGeneration, cancelServerLogin, onAdded, t]);
 
   const submitManualCode = useCallback(async (
     providerId: string,

@@ -51,8 +51,8 @@ describe("filterCatalogVisibleModels — per-provider allowlist", () => {
 describe("Copilot Auto uses the shared model visibility policy", () => {
   const models = [m("github-copilot", "auto"), m("github-copilot", "gpt-4o"), m("other", "auto")];
 
-  test.each(["detect", "auto", "manual"] as const)("pending initial selection hides every Copilot row in %s mode", copilotModelSelection => {
-    const config = cfg({ "github-copilot": { copilotModelSelection, selectedModels: ["auto"],
+  test("pending initial selection hides every Copilot row", () => {
+    const config = cfg({ "github-copilot": { selectedModels: ["auto"],
       initialModelSelection: { version: 1, registrationId: "00000000-0000-4000-8000-000000000000", status: "pending" } }, other: {} });
     expect(filterCatalogVisibleModels(models, config)).toEqual([m("other", "auto")]);
   });
@@ -62,7 +62,7 @@ describe("Copilot Auto uses the shared model visibility policy", () => {
     { selectedModels: ["unknown-model"] },
     { selectedModels: ["auto", "unknown-model"] },
   ])("the saved allowlist %j applies to Auto", ({ selectedModels }) => {
-    const config = cfg({ "github-copilot": { copilotModelSelection: "auto", selectedModels }, other: {} });
+    const config = cfg({ "github-copilot": { selectedModels }, other: {} });
     expect(filterCatalogVisibleModels(models, config).map(model => `${model.provider}/${model.id}`))
       .toEqual([...models.filter(model => model.provider === "github-copilot" && selectedModels.includes(model.id))
         .map(model => `${model.provider}/${model.id}`), "other/auto"]);

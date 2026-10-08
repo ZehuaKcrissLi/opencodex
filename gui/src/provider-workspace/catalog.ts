@@ -59,7 +59,6 @@ export interface WorkspaceProvider {
   };
   /** Codex account routing mode for the canonical `openai` forward provider. */
   codexAccountMode?: "direct" | "pool";
-  copilotModelSelection?: "detect" | "auto" | "manual";
   /** Derived state of the two xAI Grok Responses model-adapter entries. */
   xaiResponsesOptInState?: boolean | "mixed";
 }

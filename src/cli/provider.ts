@@ -163,7 +163,6 @@ function handleList(args: string[]): void {
 
 const ADD_USAGE = "Usage: ocx provider add <name> [--adapter <adapter>] [--base-url <url>] [--responses-path <path>] [--auth-mode <key|forward|oauth|local>] [--api-key <key>] [--api-key-transport <x-api-key|bearer>] [--default-model <model>] [--model <id> --text-only] [--google-tool-schema-policy <compatible|reject-lossy>] [--allow-private-network] [--set-default] [--force] [--json] [--sync | --live]";
 
-/** Add a provider from CLI flags while preserving existing configuration unless overwrite is explicit. */
 async function handleAdd(args: string[], deps: ProviderCommandDeps): Promise<void> {
   const name = args[0];
   if (!name || name.startsWith("-")) {
@@ -284,9 +283,6 @@ async function handleAdd(args: string[], deps: ProviderCommandDeps): Promise<voi
   const existingProvider = config.providers[name];
   if (existingProvider?.modelCapabilities !== undefined && provConfig.modelCapabilities === undefined) {
     provConfig.modelCapabilities = structuredClone(existingProvider.modelCapabilities);
-  }
-  if (existingProvider?.copilotModelSelection !== undefined && provConfig.copilotModelSelection === undefined) {
-    provConfig.copilotModelSelection = existingProvider.copilotModelSelection;
   }
   if (existingProvider?.modelContextTiers !== undefined && provConfig.modelContextTiers === undefined) {
     provConfig.modelContextTiers = structuredClone(existingProvider.modelContextTiers);

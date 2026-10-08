@@ -117,7 +117,7 @@ import {
   type ProviderEditorConfigDTO,
   type ProviderEditorProviderDTO,
 } from "../auth-cors";
-import { applyCopilotModelSelectionPatch, providerCatalogCapabilityConfigError } from "./provider-capability-config";
+import { providerCatalogCapabilityConfigError } from "./provider-capability-config";
 import { providerEmptyToolOutputConfigError } from "../../config/provider-validation";
 import { applySystemEnvToggle } from "../system-env";
 import {
@@ -399,11 +399,6 @@ function applyProviderPatchFields(
     const dm = rawBody.defaultModel.trim();
     if (dm) next.defaultModel = dm;
     else delete next.defaultModel;
-    touched = true;
-  }
-  if (Object.hasOwn(rawBody, "copilotModelSelection")) {
-    const error = applyCopilotModelSelectionPatch(name, next, rawBody.copilotModelSelection);
-    if (error) return { error };
     touched = true;
   }
   if (Object.hasOwn(rawBody, "authMode")) {
@@ -903,7 +898,6 @@ function providerRoutingQuota(config: OcxConfig, name: string, now: number): Pro
   return { state, updatedAt: quota.updatedAt, validUntil };
 }
 
-/** Serve provider management reads and validated writes without exposing persisted credentials. */
 export async function handleProviderRoutes(ctx: ManagementContext): Promise<Response | null> {
   const { req, url, config, deps, principal, convergeCodexCatalog, syncClaudeAgentDefsBestEffort } = ctx;
 
@@ -935,9 +929,9 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
       ]),
     ));
   }
+
   if (url.pathname === "/api/providers" && req.method === "GET") {
-    return jsonResponse(Object.entries(config.providers).map(/** Expose editable provider settings and credential-presence flags without returning stored credential values. */
-      ([name, p]) => ({
+    return jsonResponse(Object.entries(config.providers).map(([name, p]) => ({
       name, adapter: p.adapter, baseUrl: publicProviderBaseUrl(p.baseUrl), defaultModel: p.defaultModel, hasApiKey: !!p.apiKey,
       // Presence only (#959 review): header names and values never leave the process.
       hasHeaders: !!p.headers && Object.keys(p.headers).length > 0,
@@ -965,7 +959,7 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
       authMode: p.authMode,
       apiKeyTransport: p.apiKeyTransport,
       disabled: p.disabled === true,
-      codexAccountMode: providerCodexAccountMode(name, p), copilotModelSelection: p.copilotModelSelection,
+      codexAccountMode: providerCodexAccountMode(name, p),
       ...(name === "xai" ? { xaiResponsesOptInState: xaiResponsesOptInState(p) } : {}),
       // Only opt-in Fast lanes (Anthropic fast mode bills usage credits) get a dashboard switch.
       ...(getProviderRegistryEntry(name)?.fastOptIn === true ? { fastOptIn: { enabled: p.fastEnabled === true } } : {}),
@@ -1250,8 +1244,9 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     const existingPool = config.providers[name]?.apiKeyPool;
     if (existingPool && !prov.apiKeyPool
       && providerOverwriteKeepsDestination(prov, config.providers[name], overwriteSample)) prov.apiKeyPool = existingPool;
-    // The dashboard omits modelCosts; preserve hand-edited Logs/Usage prices on overwrite.
-    if (!Object.hasOwn(body.provider, "copilotModelSelection")) prov.copilotModelSelection = config.providers[name]?.copilotModelSelection;
+    // The same rule applies to user-configured price overlays: the dashboard's
+    // add/edit form does not send modelCosts, so an overwrite must not silently
+    // erase hand-edited per-model prices from Logs/Usage estimates.
     const existingCosts = config.providers[name]?.modelCosts;
     if (existingCosts && !prov.modelCosts) prov.modelCosts = existingCosts;
     // The add/edit form also omits auto-review selectors. Preserve hand-configured

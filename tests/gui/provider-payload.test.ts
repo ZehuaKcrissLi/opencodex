@@ -305,10 +305,3 @@ describe("provider dashboard payload", () => {
     expect(result.provider).not.toHaveProperty("allowPrivateNetwork");
   });
 });
-
-
-test("Copilot creation payload round-trips model-selection preference only for Copilot", () => {
-  const form = { name: "github-copilot", adapter: "openai-chat", baseUrl: "https://api.githubcopilot.com", authMode: "key" as const, apiKey: "", defaultModel: "gpt-4o", copilotModelSelection: "auto" as const };
-  expect(buildProviderPayload(form)).toMatchObject({ copilotModelSelection: "auto", defaultModel: "gpt-4o" });
-  expect(buildProviderPayload({ ...form, name: "relay" })).not.toHaveProperty("copilotModelSelection");
-});

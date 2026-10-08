@@ -5,12 +5,6 @@ import type { TKey } from "./en";
  * German i18n catalog, generated from en.ts. Must match the `TKey` set (compile-checked).
  */
 export const de: Record<TKey, string> = {
-  "pws.copilotSelection": "Copilot-Modellauswahl",
-  "pws.copilotSelectionDetect": "Kontoberechtigungen (automatisch)",
-  "pws.copilotSelectionAuto": "Student / Free (nur Auto)",
-  "pws.copilotSelectionManual": "Andere Tarife (manuelle Auswahl)",
-  "pws.copilotSelectionHint": "Automatisch folgt den Modellauswahlberechtigungen des angemeldeten Kontos. Bei Auto wählt GitHub das Modell; manuelle Modellpräferenzen bleiben gespeichert.",
-
   "nav.claude": "Claude",
   "claude.pageSub": "OpenCodex-Routing und Einstellungen für Claude Code.",
 

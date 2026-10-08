@@ -1,4 +1,3 @@
-import { CopilotModelSelection } from "./CopilotModelSelection";
 import { IconExternal, IconKey } from "../icons";
 import { useT } from "../i18n/shared";
 import { Trans } from "../i18n/provider";
@@ -15,7 +14,6 @@ function adapterOptions(current: string): string[] {
   return current && !FORM_ADAPTERS.includes(current) ? [current, ...FORM_ADAPTERS] : FORM_ADAPTERS;
 }
 
-/** Render provider-specific transport and account settings from the shared add-provider form. */
 export function AddProviderFormPane({
   preset,
   form,
@@ -178,12 +176,6 @@ export function AddProviderFormPane({
           )}
         </>
       )}
-      {preset.id === "github-copilot" && <CopilotModelSelection
-        value={form.copilotModelSelection ?? "detect"}
-        onChange={/** Update only the pending Copilot routing choice while preserving the other provider fields. */
-          value => onFormChange({ ...form, copilotModelSelection: value })}
-        disabled={saving}
-      />}
       {!isReservedForward && <AddProviderField label={t("modal.defaultModel")}>
         <input className="input" value={form.defaultModel} onChange={e => onFormChange({ ...form, defaultModel: e.target.value })} placeholder={t("modal.defaultModelPlaceholder")} />
       </AddProviderField>}

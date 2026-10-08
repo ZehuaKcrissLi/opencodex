@@ -130,7 +130,6 @@ export type ProviderUpdatePatch = {
   requestPacing?: WorkspaceItem["requestPacing"] | null;
   /** Dedicated field: the API PATCHes it alone for the canonical `openai` provider. */
   codexAccountMode?: "direct" | "pool";
-  copilotModelSelection?: "detect" | "auto" | "manual";
   /** Management-only write that atomically owns the two supported xAI Grok adapter rows. */
   xaiResponsesOptIn?: boolean;
 };

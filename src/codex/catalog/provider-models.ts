@@ -233,9 +233,6 @@ export async function fetchProviderModelsWithAuth(
   };
   // Static catalogs never need an OAuth refresh or an upstream model request. Clear any
   // discovery failure left by an older live configuration even when the account is logged out.
-  if (name === "github-copilot" && prov.copilotModelSelection === "auto")
-    return observed([applyProviderConfigHints(name, prov, { id: "auto", provider: name },
-      contextCap, metadataModelIdCaseFold, captured.effectiveAlias)], "authoritative");
   if (prov.liveModels === false) {
     clearProviderDiscoveryStatus(name);
     if (name === "kiro") {

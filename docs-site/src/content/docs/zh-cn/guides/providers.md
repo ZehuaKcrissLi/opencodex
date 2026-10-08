@@ -476,12 +476,11 @@ GPT-5.6 Sol/Terra/Luna 会预置在提供商的回退列表中，因此即使实
 使用 Bearer **订阅令牌**（而非普通 API 密钥）进行认证。
 **Cloudflare AI Gateway** 需要将 account 和 gateway id 填入 URL。
 
-Student 或 Free 账户请在 **Providers → GitHub Copilot → Settings → 模型选择** 中选择
-**Student / Free（仅 Auto）**。发现目录提供 `github-copilot/auto`，实际模型由 GitHub 为每次请求选择。
-默认“根据账户权限自动判断”仅在非空目录的每一行都明确禁止手动选择时启用 Auto；权限未知时保留具名路由。“其他套餐（手动选择）”保留具名模型选择。
-该设置不会扩大订阅权限；Auto 的可见性也受普通模型白名单、待确认/禁用状态和新模型策略约束。
-若保存的选择或策略隐藏了 Auto，请先选择或启用该条目。切回手动模式后会恢复已保存的手动模型偏好。
-CLI：`ocx provider edit github-copilot --copilot-model-selection auto`。
+Copilot 仅在非空账户目录的每个有效条目都明确禁止手动选择时自动使用 Auto。
+权限缺失或格式无效时保留具名路由；模型列表仅过滤明确禁止选择的条目。Auto-only 发现目录提供
+`github-copilot/auto`，实际模型由 GitHub 为每次请求选择，不会扩大订阅权限。
+Auto 的可见性也受普通模型白名单、待确认/禁用状态和新模型策略约束；若保存的选择或策略隐藏了
+Auto，请先选择或启用该条目。已有手动模型偏好保持保存。仅将模型命名为 `auto` 不会覆盖账户权限判断。
 
 Auto 使用公开的
 [VS Code Copilot Chat 实现](https://github.com/microsoft/vscode-copilot-chat/blob/7b70532a4cbdfa61c2b30fe4ccffda3d89336a4d/src/platform/endpoint/node/automodeService.ts)

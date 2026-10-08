@@ -10,12 +10,12 @@ const auth: ModelsAuthResolver = { kind: "observed",
   resolve: () => ({ apiKey: "synthetic-catalog-key", observed: true }) };
 beforeEach(() => { clearModelCache("github-copilot"); clearCopilotAutoModelsForTests(); });
 
-/** Build a permission-mode catalog fixture with configured hints and retained selectors; expose discovery counts without making real network calls. */
-function fixture(mode: OcxProviderConfig["copilotModelSelection"], rows: CopilotModel[]) {
+/** Build an account-permission catalog fixture with configured hints and retained selectors; expose discovery counts without making real network calls. */
+function fixture(rows: CopilotModel[]) {
   let requests = 0;
   const provider: OcxProviderConfig = {
     adapter: "openai-chat", authMode: "key", baseUrl: "https://api.githubcopilot.com",
-    copilotModelSelection: mode, models: ["live-model", "combo-model", "dropped-model"],
+    models: ["live-model", "combo-model", "dropped-model"],
     retainModels: ["retained-model"],
     modelDisplayNames: { auto: "Configured Auto", "live-model": "Configured live" },
     modelContextWindows: { auto: 48_000, "live-model": 48_000, "retained-model": 40_000 },
@@ -41,29 +41,27 @@ function expectHints(model: Awaited<ReturnType<typeof gather>>["models"][number]
 }
 
 describe("Copilot catalog configuration projection", () => {
-  test("forced Auto applies hints and cap without discovering or retaining named selectors", async () => {
-    const { provider, requests } = fixture("auto", []);
+  test("static discovery retains configured models without inferring Auto-only permission", async () => {
+    const { provider, requests } = fixture([]);
     provider.liveModels = false;
     const result = await gather(provider);
     expect(result.outcome.state).toBe("authoritative");
-    expect(result.models.map(model => model.id)).toEqual(["auto"]);
-    expectHints(result.models[0]!, "Configured Auto");
+    expect(result.models.map(model => model.id)).not.toContain("auto");
     expect(requests()).toBe(0);
     expect(provider.models).toEqual(["live-model", "combo-model", "dropped-model"]);
     expect(provider.retainModels).toEqual(["retained-model"]);
   });
 
   test("detected Auto applies hints while saved retain/combo models stay out of the picker", async () => {
-    const { provider, requests } = fixture("detect", [{ id: "live-model", model_picker_enabled: false }]);
+    const { provider, requests } = fixture([{ id: "live-model", model_picker_enabled: false }]);
     const result = await gather(provider);
     expect(result.models.map(model => model.id)).toEqual(["auto"]);
     expectHints(result.models[0]!, "Configured Auto");
     expect(requests()).toBe(1);
   });
 
-  for (const mode of ["manual", "detect"] as const) {
-    test(`${mode} discovery applies config hints/cap and retains explicit and combo selectors on warm reads`, async () => {
-      const { provider, requests } = fixture(mode, [{ id: "live-model", model_picker_enabled: true,
+  test("manual-capable discovery applies config hints/cap and retains explicit and combo selectors on warm reads", async () => {
+      const { provider, requests } = fixture([{ id: "live-model", model_picker_enabled: true,
         context_length: 128_000, capabilities: { vision: false } }]);
       for (let read = 0; read < 2; read++) {
         const result = await gather(provider);
@@ -73,11 +71,10 @@ describe("Copilot catalog configuration projection", () => {
         expect(result.models.find(model => model.id === "retained-model")?.contextWindow).toBe(32_000);
       }
       expect(requests()).toBe(1);
-    });
-  }
+  });
 
   test("legacy discovery without permission metadata preserves the shared retention contract", async () => {
-    const { provider } = fixture(undefined, [{ id: "live-model", context_length: 128_000 }]);
+    const { provider } = fixture([{ id: "live-model", context_length: 128_000 }]);
     const result = await gather(provider);
     expect(result.models.map(model => model.id)).toEqual(["live-model", "combo-model", "retained-model"]);
     expectHints(result.models[0]!, "Configured live");

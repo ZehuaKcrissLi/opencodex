@@ -82,9 +82,7 @@ async function requestJson(provider: OcxProviderConfig, path: string, signal?: A
 }
 
 /** Detect Auto-only permission only when every row explicitly denies named selection. */
-export function copilotRequiresAuto(provider: OcxProviderConfig, models: CopilotModel[]): boolean {
-  if (provider.copilotModelSelection === "auto") return true;
-  if (provider.copilotModelSelection === "manual") return false;
+export function copilotRequiresAuto(_provider: OcxProviderConfig, models: CopilotModel[]): boolean {
   return models.length > 0 && models.every(/** Missing or malformed metadata cannot establish an account-wide picker denial. */
     model => model.model_picker_enabled === false);
 }
@@ -109,8 +107,10 @@ export async function fetchCopilotAutoModels(provider: OcxProviderConfig, signal
     if (!row || typeof row.id !== "string" || !row.id || row.id.length > 256) return [];
     return [{ ...row, id: row.id } as CopilotModel];
   });
-  if (catalogs.size >= 32) catalogs.delete(catalogs.keys().next().value!);
-  if (cacheTtlMs > 0) catalogs.set(key, { expires: Date.now() + Math.min(cacheTtlMs, 60_000), models });
+  if (cacheTtlMs > 0) {
+    if (!catalogs.has(key) && catalogs.size >= 32) catalogs.delete(catalogs.keys().next().value!);
+    catalogs.set(key, { expires: Date.now() + Math.min(cacheTtlMs, 60_000), models });
+  }
   return models;
 }
 /** Reset discovery state between isolated account/permission regression cases. */
@@ -127,17 +127,15 @@ export async function resolveCopilotAuto(provider: OcxProviderConfig, requestedM
   const cleanHeaders = new Headers(transport.headers);
   cleanHeaders.delete("Copilot-Session-Token");
   transport.headers = Object.fromEntries(cleanHeaders);
-  if (requestedModel !== "auto" && provider.copilotModelSelection === "manual")
-    return { provider: transport, modelId: requestedModel, auto: false };
   let models: CopilotModel[];
   try { models = await fetchCopilotAutoModels(transport, signal, beforeSend, 60_000, concurrency); }
   catch (error) {
-    if (signal?.aborted || requestedModel === "auto" || provider.copilotModelSelection === "auto") throw error;
+    if (signal?.aborted || error instanceof ProviderOutboundSendCancelledError) throw error;
     // Permission discovery is additive for legacy paid configurations. A temporary
     // discovery outage must not turn a previously usable named route into a refusal.
     return { provider: transport, modelId: requestedModel, auto: false };
   }
-  if (requestedModel !== "auto" && !copilotRequiresAuto(provider, models))
+  if (!copilotRequiresAuto(provider, models))
     return { provider: transport, modelId: requestedModel, auto: false };
   const session = await requestJson(transport, "/models/session", signal,
     { auto_mode: { model_hints: ["auto"] } }, undefined, beforeSend, concurrency);
@@ -167,5 +165,5 @@ export async function resolveCopilotAuto(provider: OcxProviderConfig, requestedM
   if (!adapter) throw new Error("GitHub Copilot Auto selected a model with no supported inference endpoint");
   return { auto: true, modelId, expiresAt: Math.min(expiresAt, Date.now() + 60_000), provider: { ...transport, adapter,
     ...(adapter === "openai-responses" ? { responsesPath: "/responses" } : { chatCompletionsPath: "/chat/completions" }),
-    headers: { ...transport.headers, "Copilot-Session-Token": session.session_token } } };
+    headers: { ...transport.headers, "X-GitHub-Api-Version": "2026-08-01", "Copilot-Session-Token": session.session_token } } };
 }
