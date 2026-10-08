@@ -54,6 +54,42 @@ describe("Copilot Auto permissions and negotiation", () => {
     expect(copilotPickerModels({}, [{ id: "a", model_picker_enabled: true }, { id: "b", model_picker_enabled: false }])).toEqual([{ id: "a", model_picker_enabled: true }]);
     expect(copilotPickerModels({ copilotModelSelection: "auto" }, [{ id: "a", model_picker_enabled: true }])).toEqual([{ id: "auto" }]);
   });
+  test.each([
+    ["false plus missing", [{ id: "blocked", model_picker_enabled: false }, { id: "named" }], ["named"], false],
+    ["true false and missing", [{ id: "enabled", model_picker_enabled: true }, { id: "blocked", model_picker_enabled: false }, { id: "named" }], ["enabled", "named"], false],
+    ["all false", [{ id: "blocked", model_picker_enabled: false }], ["auto"], true],
+    ["empty", [], [], false],
+    ["invalid permission", [{ id: "blocked", model_picker_enabled: false }, { id: "named", model_picker_enabled: "false" }], ["named"], false],
+  ] as const)("detect projects conservative picker permissions: %s", (_label, models, expected, requiresAuto) => {
+    const rows = models as unknown as Parameters<typeof copilotRequiresAuto>[1];
+    expect(copilotRequiresAuto({}, rows)).toBe(requiresAuto);
+    expect(copilotPickerModels({}, rows).map(row => row.id)).toEqual([...expected]);
+    expect(copilotRequiresAuto({ copilotModelSelection: "auto" }, rows)).toBe(true);
+    expect(copilotPickerModels({ copilotModelSelection: "auto" }, rows)).toEqual([{ id: "auto" }]);
+    expect(copilotRequiresAuto({ copilotModelSelection: "manual" }, rows)).toBe(false);
+    expect(copilotPickerModels({ copilotModelSelection: "manual" }, rows).map(row => row.id))
+      .toEqual(rows.filter(row => row.model_picker_enabled !== false).map(row => row.id));
+  });
+  test.each([
+    ["false plus missing", [{ id: "blocked", model_picker_enabled: false }, { id: "named" }]],
+    ["true false and missing", [{ id: "enabled", model_picker_enabled: true }, { id: "blocked", model_picker_enabled: false }, { id: "named" }]],
+    ["empty", []],
+    ["invalid permission", [{ id: "blocked", model_picker_enabled: false }, { id: "named", model_picker_enabled: null }]],
+    ["malformed rows", [null, {}, { id: "" }]],
+  ])("detect preserves the named wire without a session: %s", async (_label, rows) => {
+    const paths: string[] = [];
+    const provider = { authMode: "oauth", adapter: "openai-responses", apiKey: "synthetic-account",
+      baseUrl: "https://api.githubcopilot.com", fetch: (async url => {
+        paths.push(new URL(String(url)).pathname);
+        return Response.json({ data: rows });
+      }) as typeof fetch } as OcxProviderConfig;
+    const result = await resolveCopilotAuto(provider, "named", parsed);
+    expect(result.auto).toBe(false);
+    expect(result.modelId).toBe("named");
+    expect(result.provider.adapter).toBe("openai-responses");
+    expect(result.provider.headers).not.toHaveProperty("Copilot-Session-Token");
+    expect(paths).toEqual(["/models"]);
+  });
   test("sessions are account-bound, ephemeral, and choose wire from returned endpoint metadata", async () => {
     const calls: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = [];
     /** Record negotiation headers/bodies and return distinct account pools and endpoint capabilities to expose stale-session reuse. */

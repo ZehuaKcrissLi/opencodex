@@ -477,15 +477,19 @@ GPT-5.6 Sol/Terra/Luna 会预置在提供商的回退列表中，因此即使实
 **Cloudflare AI Gateway** 需要将 account 和 gateway id 填入 URL。
 
 Student 或 Free 账户请在 **Providers → GitHub Copilot → Settings → 模型选择** 中选择
-**Student / Free（仅 Auto）**。模型列表展示 `github-copilot/auto`，实际模型由 GitHub 为每次请求选择。
-默认“根据账户权限自动判断”使用账户权限信息；“其他套餐（手动选择）”保留具名模型选择。
-该设置不会扩大订阅权限；切回手动模式后会恢复已保存的手动模型偏好。
+**Student / Free（仅 Auto）**。发现目录提供 `github-copilot/auto`，实际模型由 GitHub 为每次请求选择。
+默认“根据账户权限自动判断”仅在非空目录的每一行都明确禁止手动选择时启用 Auto；权限未知时保留具名路由。“其他套餐（手动选择）”保留具名模型选择。
+该设置不会扩大订阅权限；Auto 的可见性也受普通模型白名单、待确认/禁用状态和新模型策略约束。
+若保存的选择或策略隐藏了 Auto，请先选择或启用该条目。切回手动模式后会恢复已保存的手动模型偏好。
 CLI：`ocx provider edit github-copilot --copilot-model-selection auto`。
 
 Auto 使用公开的
 [VS Code Copilot Chat 实现](https://github.com/microsoft/vscode-copilot-chat/blob/7b70532a4cbdfa61c2b30fe4ccffda3d89336a4d/src/platform/endpoint/node/automodeService.ts)
 中的会话与意图选择协议。这是实验性客户端集成，尚无面向第三方的公开 API 契约；
-GitHub 可能改变协议或账户权限。Auto 每次请求使用选中模型声明的端点。
+GitHub 可能改变协议或账户权限。Auto 每次请求使用选中模型声明的端点。意图路由仅发送最新用户文本，
+本地上限为 32,768 个 UTF-16 码元；实际推理保留完整输入。协商采用本地防御预算：目录/模型池/候选列表各最多
+512 项，每个成功响应最多 1 MiB，每次调用最多八秒（含排队节流与响应读取）。这些是 OpenCodex 防护，
+不是已公布的 GitHub 限制；过大的目录、缓慢的协商或意图文本截断都可能影响兼容性。
 
 具名选择时，Copilot 提供混合 wire 目录：其模型（`gpt-5.3-codex`、`gpt-5.4`、
 `gpt-5.4-mini`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker`）会拒绝面向

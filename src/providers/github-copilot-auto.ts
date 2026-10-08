@@ -81,22 +81,18 @@ async function requestJson(provider: OcxProviderConfig, path: string, signal?: A
   } finally { releaseProviderRequestSlot(slot); }
 }
 
-/** An account's model inventory is not permission to select those models manually. */
+/** Detect Auto-only permission only when every row explicitly denies named selection. */
 export function copilotRequiresAuto(provider: OcxProviderConfig, models: CopilotModel[]): boolean {
   if (provider.copilotModelSelection === "auto") return true;
   if (provider.copilotModelSelection === "manual") return false;
-  const permissionKnown = models.some(/** Distinguish explicit picker permission metadata from legacy inventories that omit permission flags. */
-    model => typeof model.model_picker_enabled === "boolean");
-  return permissionKnown && !models.some(/** Treat any explicitly enabled picker row as permission for named selection in detection mode. */
-    model => model.model_picker_enabled === true);
+  return models.length > 0 && models.every(/** Missing or malformed metadata cannot establish an account-wide picker denial. */
+    model => model.model_picker_enabled === false);
 }
-/** Project manual-picker permissions; inventory-only accounts expose the synthetic Auto selector. */
+/** Retain legacy rows with unknown permissions; only an explicit denial removes a named picker row. */
 export function copilotPickerModels(provider: OcxProviderConfig, models: CopilotModel[]): CopilotModel[] {
   if (copilotRequiresAuto(provider, models)) return [{ id: "auto" }];
-  const permissionKnown = models.some(/** Require a known permission flag before filtering a legacy inventory for manual selection. */
-    model => typeof model.model_picker_enabled === "boolean");
-  return permissionKnown ? models.filter(/** Expose only explicitly selectable rows once the account supplies picker permissions. */
-    model => model.model_picker_enabled === true) : models;
+  return models.filter(/** Preserve named selection unless the provider explicitly marks the row unavailable. */
+    model => model.model_picker_enabled !== false);
 }
 /** Read the credential-bound catalog; callers may disable caching or reuse an existing lease. */
 export async function fetchCopilotAutoModels(provider: OcxProviderConfig, signal?: AbortSignal,

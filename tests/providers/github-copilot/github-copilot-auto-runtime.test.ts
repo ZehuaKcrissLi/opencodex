@@ -455,14 +455,24 @@ describe("Copilot Auto through the Responses pipeline", () => {
     expect(sent.filter(call => call.path === "/models/session")).toHaveLength(2);
   });
 
-  test("Auto-only catalog survives saved manual allowlists and explicit provider disable still wins", async () => {
+  test("Auto-only catalog retains manual preferences and requires explicit picker selection", async () => {
     const { config } = fixture();
-    const models = await fetchProviderModels("github-copilot", config.providers["github-copilot"]!, 1000);
+    const provider = config.providers["github-copilot"]!;
+    const models = await fetchProviderModels("github-copilot", provider, 1000);
+    expect(models.map(model => model.id)).toEqual(["auto"]);
+    expect(provider.defaultModel).toBe("gpt-4o");
+    expect(provider.selectedModels).toEqual(["gpt-4o"]);
+    expect(filterCatalogVisibleModels(models, config)).toEqual([]);
+    provider.selectedModels = ["auto"];
     expect(filterCatalogVisibleModels(models, config).map(model => model.id)).toEqual(["auto"]);
-    config.providers["github-copilot"]!.disabled = true;
+    provider.initialModelSelection = { version: 1, registrationId: "00000000-0000-4000-8000-000000000000", status: "pending" };
+    expect(filterCatalogVisibleModels(models, config)).toEqual([]);
+    provider.initialModelSelection.status = "ready";
+    expect(filterCatalogVisibleModels(models, config).map(model => model.id)).toEqual(["auto"]);
+    provider.disabled = true;
     expect(filterCatalogVisibleModels(models, config)).toEqual([]);
   });
-  test("an existing Off-policy baseline exposes Auto and preserves an explicit Auto disable", async () => {
+  test("an existing Off-policy baseline disables new Auto until the operator enables it", async () => {
     const { config } = fixture();
     delete config.providers["github-copilot"]!.selectedModels;
     config.modelDiscovery = { newModelPolicy: "off", knownModels: {
@@ -471,11 +481,17 @@ describe("Copilot Auto through the Responses pipeline", () => {
     const models = await fetchProviderModels("github-copilot", config.providers["github-copilot"]!, 1000);
     reconcileSuccessfulModelDiscoveries({ config, models, authoritativeProviders: ["github-copilot"],
       now: "2026-10-02T00:00:00Z", mode: "discovery" });
-    expect(config.disabledModels ?? []).not.toContain("github-copilot/auto");
+    expect(config.disabledModels).toEqual(["github-copilot/auto"]);
+    expect(config.modelDiscovery.recentArrivals?.["github-copilot"]).toEqual([{ id: "auto", at: "2026-10-02T00:00:00Z" }]);
+    expect(filterCatalogVisibleModels(models, config)).toEqual([]);
+    config.disabledModels = [];
+    reconcileSuccessfulModelDiscoveries({ config, models, authoritativeProviders: ["github-copilot"],
+      now: "2026-10-02T00:01:00Z", mode: "discovery" });
+    expect(config.disabledModels).toEqual([]);
     expect(filterCatalogVisibleModels(models, config).map(model => model.id)).toEqual(["auto"]);
     config.disabledModels = ["github-copilot/auto"];
     reconcileSuccessfulModelDiscoveries({ config, models, authoritativeProviders: ["github-copilot"],
-      now: "2026-10-02T00:01:00Z", mode: "discovery" });
+      now: "2026-10-02T00:02:00Z", mode: "discovery" });
     expect(config.disabledModels).toEqual(["github-copilot/auto"]);
     expect(filterCatalogVisibleModels(models, config)).toEqual([]);
   });

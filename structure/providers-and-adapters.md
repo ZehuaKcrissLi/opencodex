@@ -14,10 +14,12 @@ The Anthropic helper sends share the same routing authority: `getAnthropicSideca
 ## GitHub Copilot Auto selection
 
 `src/providers/github-copilot-transport.ts` retains the credential-specific destination and headers. Provider `copilotModelSelection` defaults to `detect`; `auto` explicitly selects Auto-only behavior,
-while `manual` retains named-model selection. Detection uses account permissions rather than inferring a subscription from model names: boolean `model_picker_enabled` evidence with no true
-row selects Auto; missing permission evidence retains legacy named routes. Explicit `auto` mode routes existing named selections through Auto too. Auto-only discovery exposes `auto` without deleting saved manual model preferences. The public selector is `github-copilot/auto`. As a routing selector, it is exempt from automatic disabling by new-model policy; explicit operator disables still win.
+while `manual` retains named-model selection. Detection requires a nonempty catalog whose every row explicitly has `model_picker_enabled: false`; unknown permissions retain named routes. Manual-capable picker projection removes only explicitly false rows.
+Explicit `auto` mode routes existing named selections through Auto too. Auto-only discovery supplies `github-copilot/auto` without deleting saved manual preferences; ordinary catalog allowlists, pending/disabled state and new-model policy still govern visibility.
 Before adapter construction, Auto creates a session and resolves intent against the captured credential and API origin.
 The selected model determines Chat versus Responses wire; session tokens remain request-local, unsaved, and isolated across accounts and origins.
+Negotiation uses local defensive budgets, not GitHub service limits: 512 catalog/pool/candidate entries, 256 UTF-16 units per identifier, 1 MiB per success body and eight seconds per call including pacing, fetch and body read.
+Only the latest user text is sent to intent routing, capped at 32,768 UTF-16 units; inference retains its full input. Header tokens accept at most 32,768 printable ASCII characters. Catalog caching is credential/origin-bound, at most 32 entries and 60 seconds; request-local sessions expire at the earlier server expiry or 60 seconds, with at least one second remaining at negotiation.
 Credential-changing retries repeat selection; Chat inference-401 refresh renegotiates with the refreshed credential before rebuilding the selected adapter and session.
 Same-account inference-401 refresh or pre-output OAuth-429 account rotation can move native Copilot Responses to the known `openai-chat` adapter; only that Copilot adapter receives the handoff.
 The old refusal body is cancelled and its controller unlinked/aborted; native execution releases its host lease before handing off.
@@ -506,20 +508,16 @@ One search makes at most three physical sends in total: connection-reset recover
 OpenAI helpers recheck the resolved [stored-account credit policy](codex-account-controls.md#stored-account-authentication-policy) immediately before every physical send, including those retries. An unchanged caller-owned Direct credential is not governed by stored-pool consent.
 A leg whose
 upstream terminal is `response.failed` or `response.incomplete` runs no search at all and closes
-any cell it opened rather than leaving it in progress. Assistant text is not treated as a search
-instruction.
+any cell it opened rather than leaving it in progress. Assistant text is not treated as a search instruction.
 
 `src/web-search/passthrough-bridge.ts` withholds at most 8,388,608 UTF-16 code units of
 SSE data payloads per leg; this is not a byte or total-heap measurement. A companion cap of
 65,536 events is derived from that budget at a realistic 128-code-unit serialized delta, so it
 only bounds per-event object overhead the character budget cannot see rather than refusing a
-large client-executed tool call streamed as fine-grained argument deltas. The first over-budget
-event fails the leg before releasing any held tool call, and reports that refusal as the
-bridge's own bound rather than as an upstream read failure.
-Read failures and exhausted continuation budgets use the same cleanup: discard held calls and
+large client-executed tool call streamed as fine-grained argument deltas. The first over-budget event fails the leg before releasing any held tool call, and reports that refusal as the
+bridge's own bound rather than as an upstream read failure. Read failures and exhausted continuation budgets use the same cleanup: discard held calls and
 close every search cell opened by the current leg as failed before one failed terminal and DONE.
-Successful release serializes held events lazily rather than building another full frame array;
-release, discard, and the next leg reset the held payload counter and identity sets.
+Successful release serializes held events lazily rather than building another full frame array; release, discard, and the next leg reset the held payload counter and identity sets.
 `tests/web-search/web-search-progress-stream.test.ts` covers both bounds, identity-only deltas,
 upstream cancellation, cell closure, the exact event boundary, and mixed terminal controls.
 
@@ -533,8 +531,7 @@ than a vendor-specific override. This is a model and settings rule, not a creden
 backend's credential locator, so no key crosses backends. `reasoning` and `xSearch` are not gated —
 `reasoning` is a generic effort level and `xSearch` is xai-only with no per-backend default and no
 `webSearchBridge` equivalent. `resolveSidecarBackend` lives in `src/web-search/sidecar-providers.ts`
-rather than the `src/web-search/index.ts` barrel so the bridge can answer this question without a
-value import of the barrel; the barrel re-exports it.
+rather than the `src/web-search/index.ts` barrel so the bridge can answer this question without a value import of the barrel; the barrel re-exports it.
 `tests/web-search/web-search-passthrough-bridge.test.ts` covers the mismatch and matching cases for
 anthropic, xai, and gemini, plus the unset-backend default.
 
@@ -548,14 +545,11 @@ keeps a self-hosted Ollama on `127.0.0.1` working. Both checks are synchronous a
 resolve no DNS, so a hostname that resolves into metadata or private space is a disclosed residual
 rather than a blocked case. That residual is strictly larger than `baseUrl`'s: `baseUrl` also runs
 the async `providerDestinationResolvedError` at management write, which the endpoint does not, and
-parity there would still leave the hand-edited-file path uncovered because the plan-time boundary is
-synchronous. The plan-time check is the
-authorization boundary rather than a second opinion: a hand-edited config file, `ocx config set`,
-and `ocx config import` all reach `configSchema` only and never call
+parity there would still leave the hand-edited-file path uncovered because the plan-time boundary is synchronous. The plan-time check is the
+authorization boundary rather than a second opinion: a hand-edited config file, `ocx config set`, and `ocx config import` all reach `configSchema` only and never call
 `providerWebSearchBridgeConfigError`, and `resolveOllamaWebSearchEndpoint` is the only reader of
 this field in the tree, so a value that survives file load still cannot be spent. It refuses
-silently by design; config-time is where the operator is told why. The planner requires the
-provider name for that assessment, so `planPassthroughWebSearchBridge` takes it explicitly.
+silently by design; config-time is where the operator is told why. The planner requires the provider name for that assessment, so `planPassthroughWebSearchBridge` takes it explicitly.
 
 ## Meta Responses tool selection
 
@@ -564,10 +558,8 @@ uses `src/adapters/openai-responses/muse-tool-choice.ts` to normalize `tool_choi
 `auto` selection keeps its meaning. Explicit `none` sets `tools` to an empty list, removes
 `additional_tools` items from `input`, and omits `tool_choice` and `parallel_tool_calls` from the
 outgoing body. Forced, named, and `allowed_tools` selections fail with HTTP 400 before the
-upstream send because Muse supports only `auto`. Filtering a required tool never changes the
-caller's obligation into `none` or `auto`. This rule applies only to the Meta Responses
-destination. The input body, historical tool calls and results, and non-Meta requests keep their
-existing meaning.
+upstream send because Muse supports only `auto`. Filtering a required tool never changes the caller's obligation into `none` or `auto`. This rule applies only to the Meta Responses
+destination. The input body, historical tool calls and results, and non-Meta requests keep their existing meaning.
 
 ## Shared type declarations
 
@@ -577,13 +569,11 @@ request shape (`src/types/request.ts`). Two files also own small resolvers that 
 boundary. `src/types/tools.ts` owns tool-name identity: namespaced and dotted names, declared-name
 normalization, and `tool_choice` alias resolution, so every adapter matches a declared tool the
 same way. `src/types/wire.ts` owns accepted wire enumerations such as the per-provider upstream
-HTTP-version pin, shared by the config load schema, the management write boundary, and the fetch
-runtime, so no boundary accepts a value another rejects.
+HTTP-version pin, shared by the config load schema, the management write boundary, and the fetch runtime, so no boundary accepts a value another rejects.
 
 `src/types/config.ts` declares the optional per-phase `memoryModels` setting;
 `src/types/request.ts` carries the selected phase through combo handoffs without changing the
-public request model. [Memory phase routing](transports/responses-failover.md#memory-phase-routing)
-owns the selection rule.
+public request model. [Memory phase routing](transports/responses-failover.md#memory-phase-routing) owns the selection rule.
 
 Preflight heartbeat retention keeps `replayUnsafe` sticky in the replayed tail, so a second preflight cannot forget earlier side effects after the original marker is evicted.
 

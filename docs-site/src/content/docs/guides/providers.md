@@ -1275,18 +1275,23 @@ a key/subscription-token gateway on its OpenAI-compatible endpoint. **Cloudflare
 Gateway** needs your account + gateway ids filled into the URL.
 
 For Copilot Student or Free accounts, choose **Providers → GitHub Copilot → Settings →
-Model selection → Student / Free (Auto only)**. The picker exposes `github-copilot/auto`;
+Model selection → Student / Free (Auto only)**. Discovery supplies `github-copilot/auto`;
 GitHub selects the actual model for each request. The default **Account permissions
 (automatic)** mode uses account evidence; **Other plans (manual selection)** preserves
-named-model selection. This setting controls model selection and does not change subscription
-permissions. Stored manual model preferences return when you switch back to manual mode.
+named-model selection. Automatic mode requires every row in a nonempty catalog to explicitly deny manual selection before choosing Auto; unknown permissions keep named routes. This setting controls model selection and does not change subscription
+permissions. Ordinary model allowlists, pending/disabled state and new-model policy also apply to Auto visibility.
+If saved selections or policy hide Auto, select or enable the Auto row before using it. Stored manual model preferences return when you switch back to manual mode.
 CLI: `ocx provider edit github-copilot --copilot-model-selection auto`.
 
 Auto follows the session and intent protocol in the public
 [VS Code Copilot Chat implementation](https://github.com/microsoft/vscode-copilot-chat/blob/7b70532a4cbdfa61c2b30fe4ccffda3d89336a4d/src/platform/endpoint/node/automodeService.ts).
 This is an experimental client integration, not a documented third-party API contract;
 GitHub may change the protocol or account permissions. Auto uses the selected model’s
-advertised endpoint for each request.
+advertised endpoint for each request. Intent routing sends only the latest user text, capped locally
+at 32,768 UTF-16 code units; the actual inference keeps the full input. Negotiation has local
+defensive budgets of 512 catalog/pool/candidate entries, 1 MiB per successful response and eight
+seconds per call, including pacing and body reads. These are OpenCodex safeguards, not documented
+GitHub limits; oversized catalogs, slow negotiation or a truncated intent excerpt can affect compatibility.
 
 For named selections, Copilot fronts a mixed-wire catalog: the following models (`gpt-5.3-codex`, `gpt-5.4`,
 `gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker`) reject
