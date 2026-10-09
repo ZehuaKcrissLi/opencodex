@@ -37,10 +37,11 @@ import {
   type AnthropicMessagesPassthroughRequest,
 } from "../adapters/anthropic/passthrough";
 import { resolveInboundModel } from "../claude/inbound";
-import { anthropicErrorBody, anthropicErrorResponse, collectAnthropicMessage } from "../claude/outbound";
+import { anthropicErrorBody, anthropicErrorResponse, claudeOverflowSsePayload, claudePromptTooLongMessage, collectAnthropicMessage, isContextOverflowText, isThroughputLimitText } from "../claude/outbound";
 import type { AdmissionLease } from "../lib/admission";
 import { readBoundedResponseBody } from "../lib/bounded-body";
 import { classifyError } from "../lib/errors";
+import { relaySseWithPayloadRewrite } from "./sse-payload-rewrite";
 import { redactSecretString } from "../lib/redact";
 import { resolveClientRetryAfter } from "../lib/retry-after";
 import { isTranslatorBudgetExceededError, type TranslatorBudget } from "../lib/translator-budget";
@@ -764,7 +765,12 @@ export async function handleNativeMessages(options: HandleNativeMessagesOptions)
           releaseStreamTurn();
         }
       }, bodyGuard);
-      return new Response(relayed, {
+      // A configured Messages provider words an oversized-input refusal its own way; Claude Code
+      // compacts only on Anthropic's wording (devlog/_plan/261009_claude_1m_default/010). The
+      // rewrite buffers whole frames, so it sits after the tap: stall detection keeps timing raw
+      // upstream bytes. Real Anthropic pools refuse pre-stream in that wording and keep one relay.
+      const clientStream = nativeInstance ? relayed : relaySseWithPayloadRewrite(relayed, claudeOverflowSsePayload, translatorBudget);
+      return new Response(clientStream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" },
       });
@@ -789,6 +795,7 @@ export async function handleNativeMessages(options: HandleNativeMessagesOptions)
         // as the streaming lane's row; a plain upstream error event keeps the non_stream row.
         const tapMeta = tapState.meta;
         if (tapMeta && (tapMeta.terminalStatus || tapMeta.closeReason !== "terminal")) finishLog(502, text, tapMeta);
+        if (isNativeOverflowError(error, text)) return fail(400, claudePromptTooLongMessage(text), "invalid_request_error");
         return fail(502, text, "api_error");
       }
       finishLog(200);
@@ -858,6 +865,13 @@ export async function handleNativeMessages(options: HandleNativeMessagesOptions)
   return new Response(serialized, { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
+/** A folded stream error that refuses an oversized input (same gate as the SSE rewrite). */
+function isNativeOverflowError(error: Rec, message: string): boolean {
+  const sized = error.type === "invalid_request_error" || error.type === "request_too_large";
+  return sized && !isThroughputLimitText(message)
+    && (error.code === "context_length_exceeded" || isContextOverflowText(message));
+}
+
 /**
  * A non-OK upstream answer in Anthropic shape. Status and retry policy follow the translated
  * Messages path, so a client sees the same contract on either lane: transient 5xx become 529
@@ -865,11 +879,13 @@ export async function handleNativeMessages(options: HandleNativeMessagesOptions)
  */
 function nativeMessagesErrorResponse(response: Response, bodyText: string, finishLog: FinishLog): Response {
   let upstreamType: string | undefined;
+  let upstreamCode: string | undefined;
   let upstreamMessage: string | undefined;
   try {
     const parsed = JSON.parse(bodyText) as Rec;
     const details = isRec(parsed.error) ? parsed.error : parsed;
     if (typeof details.type === "string") upstreamType = details.type;
+    if (typeof details.code === "string") upstreamCode = details.code;
     if (typeof details.message === "string" && details.message.trim()) {
       upstreamMessage = redactSecretString(details.message.trim());
     }
@@ -898,9 +914,17 @@ function nativeMessagesErrorResponse(response: Response, bodyText: string, finis
   if (retryAfter) headers.set("Retry-After", retryAfter);
   else if (transient) headers.set("Retry-After", "2");
   if (replayRefusal) applyReplayRefusalClientHeaders(headers);
+  // The native envelope keeps its shape (no added code); only an overflow's wording changes, so
+  // Claude Code recognizes it and compacts (010).
+  // Only a 400/413 refusal: the shared classifier also files a 429 "too many tokens per minute"
+  // under context_length_exceeded, and that one must stay a rate limit.
+  const overflow = !replayRefusal && (response.status === 400 || response.status === 413)
+    && !isThroughputLimitText(safeMessage)
+    && (classified.code === "context_length_exceeded" || upstreamCode === "context_length_exceeded"
+      || isContextOverflowText(safeMessage));
   const out = new Response(JSON.stringify(anthropicErrorBody(
     status,
-    safeMessage,
+    overflow ? claudePromptTooLongMessage(safeMessage) : safeMessage,
     transient ? "overloaded_error" : upstreamType,
     replayRefusal ? UPSTREAM_RESET_REPLAY_REFUSED_CODE : undefined,
   )), { status, headers });

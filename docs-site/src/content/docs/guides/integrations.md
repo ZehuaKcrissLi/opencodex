@@ -29,7 +29,7 @@ file, and removes it again. Eighteen clients work this way, each with a switch:
 
 "omo" names three products that share the `~/.omo` folder. The **omo** tab manages Pi-based omo
 (the senpi engine) through `~/.omo/agent/models.json`, as in the table above. Codex-based omo
-(LazyCodex) gets its own controls on the Codex tab, described in
+(LazyCodex) gets its own section on the same tab, shown only when LazyCodex is detected, described in
 [omo (Codex / LazyCodex) role models](#omo-codex--lazycodex-role-models). OpenCode-based omo
 (oh-my-opencode) keeps its own config under OpenCode; opencodex does not read or write it.
 
@@ -652,7 +652,7 @@ key) in the app's API key field. The app sends it as `Authorization: Bearer`, wh
 
 ## omo (Codex / LazyCodex) role models
 
-When LazyCodex is installed, the Codex tab shows an **omo (Codex / LazyCodex)** section listing
+When LazyCodex is installed, the omo tab shows an **omo (Codex / LazyCodex)** section below the Pi-based omo controls, listing
 every Codex agent role found in `$CODEX_HOME/agents/*.toml`, with the model each one is pinned
 to. Codex runs a role on that pin no matter which model the parent asks for, so this is where a
 role's model is actually decided. LazyCodex counts as installed when the `omo@sisyphuslabs`
@@ -665,7 +665,7 @@ press Save:
 - opencodex rewrites only the root `model = "..."` line of that role's file. The role's
   instructions, comments, and other keys are left exactly as they were. A role with no pin gets
   one added near the top of the file.
-- The same value is written to `codex.agents.<role>.model` in `~/.omo/omo.jsonc`, which
+- The same value is written to `[codex].agents.<role>.model` in `~/.omo/omo.jsonc`, which
   LazyCodex 5.1.1 and later reads. If that file does not exist it is not created. If it contains
   comments it is left untouched, because saving would remove them; the tab says so, and you can
   set the value there by hand. Symlinks and non-regular files are rejected; on macOS and Linux,

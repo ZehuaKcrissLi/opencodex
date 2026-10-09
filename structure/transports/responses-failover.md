@@ -340,9 +340,9 @@ endpoint. A mismatch marks the credential domain as rewritten, exactly like a sh
 intercept, and forces the portable summarizer even for a native-capable target: `compact.ts`
 skips `/responses/compact`, and `request-prepare.ts` sets `parsed._portableCompaction`, which
 `request-sidecar-auth.ts` (`routedCompaction`) and the passthrough adapter's compaction body
-build both honor for canonical ChatGPT destinations. Native ciphertext is replayable only by the
-backend that minted it; the conversation model would otherwise resume with an omission marker
-in place of its history.
+build both honor for canonical ChatGPT destinations. Native ciphertext is replayable only by the backend that minted it; the conversation model would otherwise resume with an omission marker in place of its history.
+
+The portable Responses summarizer in `src/adapters/openai-responses/passthrough.ts` uses `src/adapters/openai-responses/compaction-search-history.ts` to render remaining top-level `web_search_call` items, after bridge restoration, as assistant reference notes labeled untrusted historical metadata (not instructions or fetched page content). The allowlist keeps string status and action fields (type, query/queries, URL, pattern, source URL/title/type); opaque state, IDs, unknown fields and malformed values are omitted. Strings are cut at 2048 code units, lists at 20 entries, and one request carries at most 64 KiB of notes; later hosted cells collapse into a single omission note reserved inside that budget. Tool declarations stay absent, bridge-restored call/result pairs and existing messages/citations stay intact, and only the summary request changes, never stored history, ordinary turns or native compaction. A failed summary publishes no replacement history. Lite requests retain `parallel_tool_calls=false`, which the upstream requires even without tool declarations.
 
 `tests/responses/responses-compaction-override.test.ts` covers source filtering, trigger selection, config
 validation, native and routed handlers, credential retention, portable summaries and replay, and combo failover.
