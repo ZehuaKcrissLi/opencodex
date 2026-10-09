@@ -502,7 +502,7 @@ fingerprint 방식을 그대로 따르지만, 장시간 무인 작업에 쓰기 
 
 ## 추론 강도
 
-Claude Code의 `/effort` 설정은 어댑터에서도 유지돼요.
+Messages → Responses로 변환되는 요청에서는 Claude Code의 `/effort` 설정을 다음과 같이 매핑해요.
 
 | 전송 형식 | 매핑 |
 | --- | --- |
@@ -510,7 +510,9 @@ Claude Code의 `/effort` 설정은 어댑터에서도 유지돼요.
 | `thinking.type: "enabled"` + `budget_tokens` | ≤4096→`low`, ≤16384→`medium`, 그보다 크면→`high` |
 | `thinking.type: "disabled"` | `reasoning: { effort: "none" }`을 명시하고 `summary`는 생략해요 |
 
-해석된 값은 요청 로그의 **Reasoning effort** 열에 표시돼요.
+변환된 요청에서는 매핑된 단계가 요청 로그의 **Reasoning effort** 열에 표시돼요.
+관리형 네이티브 Messages는 인식 가능한 `output_config.effort`가 없을 때 활성화된 thinking 예산을
+`budget:<tokens>`로 기록하며, 이 로깅은 전송 본문을 변경하지 않아요.
 
 ## 입력 변환(Messages → Responses)
 
@@ -691,3 +693,5 @@ Claude Code **2.1.257 or newer** is required for FORCE. Plugin and built-in agen
 The dashboard warns about old or unknown CLI versions, unavailable targets, and either variable already present in `settings.json` → `env` (which overrides launch env). Detection is read-only and server-local: it cannot inspect another launch shell, another machine, or project-local settings. An unknown result is not proof of force support.
 
 Explicit gateway selectors on a generated agent request take precedence over its legacy `ocx-route` fallback, even if the saved force setting changes after launch. For shell or settings overrides of generated roster agents, use an explicit gateway alias; bare Claude ids retain the older-client fallback behavior. Native aliases restore their bare model before the existing credential and model-map checks. Connected launches validate force targets against a fresh authenticated gateway catalog; failed discovery skips automatic force injection, and cached context windows alone never prove availability.
+
+출력 전의 응답에서만 정확한 HTTP 401 authentication_error (error.code 없음) 메시지가 “OAuth access token has been revoked.”이면 요청을 보낸 OAuth 계정에 재로그인이 필요하다고 표시하고 세션 연결을 해제합니다. 출력 전에는 기존 전송 제한 안에서 같은 풀의 사용 가능한 계정으로 전환할 수 있습니다. 대체 계정이 없으면 원래 401을 반환하며, 해당 계정은 재로그인할 때까지 선택에서 제외됩니다. 다른 401의 처리는 바뀌지 않습니다.

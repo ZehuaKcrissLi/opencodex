@@ -341,7 +341,7 @@ catalog path calls it, and opencodex never creates, repairs, or removes a role f
 - The role name must equal a listed `*.toml` stem, which is also the path-traversal check. The
   target must be a regular file owned by the running user; the replacement is atomic and does
   not follow a symbolic link.
-- The same pick is mirrored into LazyCodex's `[codex].agents.<role>.model`; that half belongs to
+- The same pick is mirrored into LazyCodex's `[codex].agents.<role>` as `model` and, for an effort LazyCodex can express, `reasoning`; that half belongs to
   [client integrations](clients/integrations.md#omo-codex-lazycodex-role-models). The role file is written first
   and stands even when the mirror is skipped.
 
@@ -506,7 +506,7 @@ The account history response can include a [low-confidence effective capacity es
 
 Account quota surfaces use [safe probe diagnostics](transports/inventory.md#account-quota-failure-diagnostics) separately from quota validity, credential health and routing authority.
 
-Combo child requests normalize effort and thinking controls against the selected target while retaining reasoning summaries; strict unknown targets preserve caller controls. The [Responses transport owner](transports/responses.md) documents this boundary, and native Chat removes effort only for an explicit empty declaration or no-reasoning model.
+Combo child requests normalize effort and thinking controls against the selected target while retaining reasoning summaries; strict unknown targets preserve caller controls. The [Responses transport owner](transports/responses.md) documents this boundary, and native Chat capability stripping applies only for an explicit empty declaration or no-reasoning model; an initial JEV null choice separately strips caller effort.
 
 Live sideband admission and its bounded upstream handshake follow the [runtime contract](runtime.md#live-sideband-handshake); the ordinary Responses WebSocket exchange remains separate.
 

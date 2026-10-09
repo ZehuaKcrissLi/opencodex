@@ -81,6 +81,12 @@ Operational contract when enabled:
   access, policy and unrecognized errors stay terminal. Recovery respects model routes and
   send limits; if no replacement is eligible, the original 403 is returned. This also works
   with proactive pooling off. A 403 after assistant output starts never switches accounts.
+- Before output, an exact structured **401** authentication_error with no error code and the message
+  “OAuth access token has been revoked.” marks the sending OAuth account as requiring
+  a new login and clears its session affinities. Before output, an eligible account in
+  the same pool may take over within existing send limits. With no eligible replacement,
+  the original 401 is returned; the refused account remains excluded until login.
+  Other 401 errors retain their existing behavior.
 - Token-refresh credential failures retain the existing `needsReauth` policy. Subscription
   renewal does not require reauthentication, but the account waits for its cooldown to expire.
 - If every eligible account is cooling, the proxy returns **429** (not 401) with `Retry-After`
@@ -94,6 +100,12 @@ Operational contract when enabled:
 See [Configuration](/reference/configuration/providers/#anthropicaccountpool-experimental).
 
 ### Native Messages with account pooling
+
+Managed native Messages show validated caller effort in Logs and `usage.jsonl`, including each
+attempt: an explicit effort such as `xhigh` or `low`, `none` for disabled thinking, or
+`budget:<tokens>` for an enabled thinking budget. An explicit effort takes precedence over the
+thinking fallback. Adaptive thinking without an explicit effort stays blank. These labels describe
+request controls; they do not confirm what effort the upstream applied or change the wire body.
 
 An enabled Anthropic account pool prefers native Messages for eligible direct Anthropic routes
 when neither native rollout flag explicitly disables that path. In Providers → Anthropic →
@@ -812,7 +824,7 @@ would exceed the limit is omitted for that turn.
 
 ## Reasoning effort
 
-Claude Code's `/effort` setting is preserved across the adapter:
+On translated Messages → Responses requests, Claude Code's `/effort` setting maps as follows:
 
 | Wire format | Mapping |
 | --- | --- |
@@ -820,7 +832,9 @@ Claude Code's `/effort` setting is preserved across the adapter:
 | `thinking.type: "enabled"` + `budget_tokens` | ≤4096→`low`, ≤16384→`medium`, above→`high` |
 | `thinking.type: "disabled"` | `reasoning: { effort: "none" }`; summary omitted |
 
-The resolved value appears in the request log's **Reasoning effort** column.
+For translated requests, the resolved tier appears in the request log's **Reasoning effort** column.
+Managed native Messages log enabled thinking budgets as `budget:<tokens>` when no recognized
+`output_config.effort` is present; this logging does not change the wire body.
 
 ## Inbound translation (Messages → Responses)
 

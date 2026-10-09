@@ -52,6 +52,8 @@ export function createIsolatedTestEnvironment(
   const opencodexHome = join(root, ".opencodex");
   const codexHome = join(root, ".codex");
   const containedTemp = createContainedTestTemp(root);
+  const transpilerCache = baseEnv.BUN_RUNTIME_TRANSPILER_CACHE_PATH ?? join(root, "bun-transpiler-cache");
+  if (baseEnv.BUN_RUNTIME_TRANSPILER_CACHE_PATH === undefined) mkdirSync(transpilerCache, { mode: 0o700 });
   mkdirSync(opencodexHome, { recursive: true });
   mkdirSync(codexHome, { recursive: true });
   if (process.platform === "win32") {
@@ -78,6 +80,10 @@ export function createIsolatedTestEnvironment(
       // real-home write guard can still know which path to protect.
       // (devlog 260730_codex_rs_upstream_v2_live_handoff/070.)
       OCX_REAL_HOME: baseEnv.OCX_REAL_HOME ?? homedir(),
+      // Same hand-off for the guard's Claude entry: the child gets a sandboxed
+      // CLAUDE_CONFIG_DIR below, so the developer's own value only survives here.
+      OCX_REAL_CLAUDE_CONFIG_DIR: baseEnv.OCX_REAL_CLAUDE_CONFIG_DIR
+        ?? (baseEnv.CLAUDE_CONFIG_DIR?.trim() || join(baseEnv.OCX_REAL_HOME ?? homedir(), ".claude")),
       // Pin git's global config to the developer's real one before HOME moves.
       //
       // git resolves ~/.gitconfig from HOME, so a sandboxed HOME makes it invisible.
@@ -89,19 +95,21 @@ export function createIsolatedTestEnvironment(
       // whichever adapter collected the metadata. Naming the file keeps the sandbox
       // (git still writes nothing here) while leaving git's own trust decisions intact.
       GIT_CONFIG_GLOBAL: baseEnv.GIT_CONFIG_GLOBAL ?? join(homedir(), ".gitconfig"),
-      // Pin Bun's runtime transpiler cache for the same reason. Bun keeps it under the home
-      // directory (macOS: ~/Library/Caches/bun/@t@), so a sandboxed HOME/USERPROFILE handed every
-      // batch, and every fixture that gives its child its own HOME, an empty cache: the first child
-      // re-transpiled each large module (73 src files are over the 50 KB cache threshold). On a busy
-      // Windows shard that first child took 10-45 s where later ones took 2-5 s, failing whichever
-      // timed case happened to spawn it. The cache holds transpiled source only, so sharing it keeps
-      // the sandbox. An explicit value, including "" or "0" to disable it, is kept as given.
-      BUN_RUNTIME_TRANSPILER_CACHE_PATH: baseEnv.BUN_RUNTIME_TRANSPILER_CACHE_PATH
-        ?? join(hostTemp, "ocx-test-bun-transpiler-cache"),
+      // Cached JavaScript is executable input. Keep the default beneath the exclusively created
+      // private root; nested sandboxes and fixture children retain this path even when HOME moves.
+      // Independent runs start cold. A protected explicit cache can share across runs; "" and "0"
+      // still disable caching. Never adopt, repair or reclaim the old shared host-TEMP cache.
+      BUN_RUNTIME_TRANSPILER_CACHE_PATH: transpilerCache,
       HOME: root,
       USERPROFILE: root,
       OPENCODEX_HOME: opencodexHome,
       CODEX_HOME: codexHome,
+      // Client homes that otherwise default to os.homedir(). Bun keeps the home it read at
+      // startup, so a preload that only rewrites HOME leaves these at the developer's real
+      // directories, and Claude agent sync prunes generated files there (#6775). Pin them in
+      // the sandbox; never inherit a live override.
+      CLAUDE_CONFIG_DIR: join(root, ".claude"),
+      GROK_HOME: join(root, ".grok"),
       TEMP: containedTemp,
       TMP: containedTemp,
       TMPDIR: containedTemp,
@@ -374,6 +382,10 @@ export const SERIAL_FULL_SUITE_FILES = [
   "providers/cursor/cursor-native-exec-shell.test.ts",
   "codex-integration/issue-452-empty-503.test.ts",
   "adapters/openai/openai-provider-option-e2e.test.ts",
+  // Three Linux runs in a row timed out mid-file inside a 12-file batch while
+  // every case passed alone (37730984813, 37732846946, 37735238354, all test
+  // 1/4 batch 4): the same multi-file process-state class as the entries below.
+  "ci-workflows/ci-gui-typecheck-gate.test.ts",
   "ci-workflows/release-helper.test.ts",
   // The full macOS isolate pool stalled in the structure gate's synchronous Git
   // child after earlier files; fresh-process execution retains the same assertions.

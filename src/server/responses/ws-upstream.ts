@@ -26,7 +26,7 @@ import { codexWsCreateFrameExceedsLimit } from "./codex-ws-wire";
 import { isLoopbackUrl, rewriteWebSocketDial } from "../../plugins/upstream-hooks";
 export { CODEX_WS_LIVENESS_PING_INTERVAL_MS, CODEX_WS_RESPONSE_PRELUDE_TIMEOUT_MS, MAX_CODEX_WS_FRAME_BYTES, MAX_CODEX_WS_QUEUE_BYTES,
   MAX_CODEX_WS_CREATE_FRAME_BYTES, CODEX_WS_CREATE_FRAME_LIMIT_BYTES, codexWsCreateFrameExceedsLimit,
-  isCodexWsQuotaObservedResponse, isCodexWsUpstreamResponse } from "./codex-ws-wire";
+  isCodexWsQuotaObservedResponse, isCodexWsUpstreamResponse, isCodexWsPreludeProjection } from "./codex-ws-wire";
 export const MIN_BOUNDED_CODEX_WS_BUN_VERSION = "1.4.0";
 
 /**
@@ -148,6 +148,7 @@ export function shouldUseCodexWsUpstream(
   }
 }
 
+/** Select the bounded WS lane or HTTP fallback, forwarding receipts at physical dispatch. */
 export function codexWsUpstreamFetch(
   url: string,
   init: RequestInit,
@@ -157,6 +158,7 @@ export function codexWsUpstreamFetch(
   beforeDispatch?: (headers: Headers) => void,
   nativeControl?: NativeResponseControl,
   beforeContinuation?: () => Promise<void>,
+  onPhysicalDispatch?: () => void,
 ): Promise<Response> {
   const prepared = prepareCodexWsRequest(url, init);
   if (!prepared) return sseFallback(url, prepareCodexHttpInit(url, init));
@@ -229,7 +231,7 @@ export function codexWsUpstreamFetch(
   return codexWsExchange({
     session, url, init, prepared, sseFallback, onQuota, beforeDispatch,
     nativeControl: control,
-    beforeContinuation,
+    beforeContinuation, onPhysicalDispatch,
     bunVersion: typeof runtime === "string" ? runtime : runtime.version,
   });
 }

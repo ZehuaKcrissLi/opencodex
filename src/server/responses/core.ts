@@ -28,8 +28,6 @@ import { deliverAdapterResponse } from "./adapter-delivery";
 import { releaseUpstreamHostAdmission } from "../../codex/upstream-host-health";
 import { releaseCodexAuthContextProbeLease } from "../../codex/auth-context";
 import { runWithCompactionRecovery } from "./compaction-recovery";
-/** Public Responses entry and compatibility exports. Implementations live with their owners. */
-
 /**
  * Route one `/v1/responses` request through the adapter pipeline: recovery loop, passthrough
  * wire, image/web-search bridges, and the terminal-guard continuation.
@@ -72,6 +70,8 @@ export async function handleResponses(
     release();
     if (ownsBudget) translatorBudget.dispose();
     throw error;
+  } finally {
+    if (!options.comboInitialSend?.producerOwned) options.comboInitialSend?.permit.release();
   }
 }
 export async function handleComboResponses(

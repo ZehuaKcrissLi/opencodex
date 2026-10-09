@@ -509,7 +509,7 @@ Search 和圖像描述沿用儲存庫已有的 Claude Code OAuth fingerprint 先
 
 ## 推理強度
 
-Claude Code 的 `/effort` 設定會完整保留並傳遞給適配器：
+對於從 Messages 轉換為 Responses 的請求，Claude Code 的 `/effort` 設定依下表對映：
 
 | 傳輸格式 | 對映 |
 | --- | --- |
@@ -517,7 +517,9 @@ Claude Code 的 `/effort` 設定會完整保留並傳遞給適配器：
 | `thinking.type: "enabled"` + `budget_tokens` | ≤4096→`low`，≤16384→`medium`，更高→`high` |
 | `thinking.type: "disabled"` | `reasoning: { effort: "none" }`；省略摘要 |
 
-解析後的值會顯示在請求日誌的 **Reasoning effort** 列中。
+對於轉換後的請求，對映得到的等級會顯示在請求日誌的 **Reasoning effort** 欄中。
+受管理的原生 Messages 請求在沒有可識別的 `output_config.effort` 時，將啟用的 thinking 預算記錄為
+`budget:<tokens>`；此日誌記錄不會變更傳輸的請求本文。
 
 ## 入站轉換（Messages → Responses）
 
@@ -670,3 +672,5 @@ Claude Code **2.1.257 or newer** is required for FORCE. Plugin and built-in agen
 The dashboard warns about old or unknown CLI versions, unavailable targets, and either variable already present in `settings.json` → `env` (which overrides launch env). Detection is read-only and server-local: it cannot inspect another launch shell, another machine, or project-local settings. An unknown result is not proof of force support.
 
 Explicit gateway selectors on a generated agent request take precedence over its legacy `ocx-route` fallback, even if the saved force setting changes after launch. For shell or settings overrides of generated roster agents, use an explicit gateway alias; bare Claude ids retain the older-client fallback behavior. Native aliases restore their bare model before the existing credential and model-map checks. Connected launches validate force targets against a fresh authenticated gateway catalog; failed discovery skips automatic force injection, and cached context windows alone never prove availability.
+
+僅在輸出開始前的回應中，僅當 HTTP 401 的 authentication_error（無 error.code） 訊息完全等於 “OAuth access token has been revoked.” 時，發送請求的 OAuth 帳戶會被標記為需要重新登入，並清除工作階段綁定。輸出開始前，可在既有發送限制內切換到同一池的可用帳戶；沒有替代帳戶時回傳原始 401，該帳戶在重新登入前不會被選取。其他 401 的處理保持不變。

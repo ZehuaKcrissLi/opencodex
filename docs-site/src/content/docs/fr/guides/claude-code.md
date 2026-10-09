@@ -611,7 +611,7 @@ pour de longues exécutions sans surveillance.
 
 ## Effort de raisonnement
 
-Le paramètre `/effort` de Claude Code est conservé sur l'ensemble de l'adaptateur :
+Pour les requêtes traduites de Messages vers Responses, le paramètre `/effort` de Claude Code est converti comme suit :
 
 | Format du protocole | Correspondance |
 | --- | --- |
@@ -619,7 +619,9 @@ Le paramètre `/effort` de Claude Code est conservé sur l'ensemble de l'adaptat
 | `thinking.type: "enabled"` + `budget_tokens` | ≤4096→`low`, ≤16384→`medium`, ci-dessus→`high` |
 | `thinking.type: "disabled"` | `reasoning: { effort: "none" }` ; résumé omis |
 
-La valeur résolue apparaît dans la colonne **Effort de raisonnement** du journal des demandes.
+Pour les requêtes traduites, le niveau obtenu apparaît dans la colonne **Effort de raisonnement** du journal des demandes.
+Les requêtes Messages natives gérées consignent le budget de réflexion activé sous la forme `budget:<tokens>`
+en l'absence d'un `output_config.effort` reconnu ; cette journalisation ne modifie pas le corps transmis.
 
 ## Traduction entrante (Messages → Réponses)
 
@@ -773,3 +775,5 @@ Claude Code **2.1.257 or newer** is required for FORCE. Plugin and built-in agen
 The dashboard warns about old or unknown CLI versions, unavailable targets, and either variable already present in `settings.json` → `env` (which overrides launch env). Detection is read-only and server-local: it cannot inspect another launch shell, another machine, or project-local settings. An unknown result is not proof of force support.
 
 Explicit gateway selectors on a generated agent request take precedence over its legacy `ocx-route` fallback, even if the saved force setting changes after launch. For shell or settings overrides of generated roster agents, use an explicit gateway alias; bare Claude ids retain the older-client fallback behavior. Native aliases restore their bare model before the existing credential and model-map checks. Connected launches validate force targets against a fresh authenticated gateway catalog; failed discovery skips automatic force injection, and cached context windows alone never prove availability.
+
+Uniquement avant toute sortie : Un HTTP 401 authentication_error (sans error.code) portant exactement le message « OAuth access token has been revoked. » marque le compte OAuth ayant envoyé la requête comme nécessitant une nouvelle connexion et efface ses affinités de session. Avant toute sortie, un compte disponible du même pool peut prendre le relais dans les limites existantes. Sans remplaçant, le 401 original est renvoyé et le compte reste exclu jusqu’à une nouvelle connexion. Les autres 401 gardent leur traitement actuel.

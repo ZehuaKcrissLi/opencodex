@@ -496,7 +496,7 @@ Claude Code — это лишь учётные данные для доступ�
 
 ## Уровень рассуждений
 
-Настройка `/effort` в Claude Code сохраняется при прохождении через адаптер:
+Для запросов, преобразуемых из Messages в Responses, настройка `/effort` в Claude Code сопоставляется следующим образом:
 
 | Формат передачи | Сопоставление |
 | --- | --- |
@@ -504,7 +504,9 @@ Claude Code — это лишь учётные данные для доступ�
 | `thinking.type: "enabled"` + `budget_tokens` | ≤4096→`low`, ≤16384→`medium`, выше→`high` |
 | `thinking.type: "disabled"` | Явно передаётся `reasoning: { effort: "none" }`, а `summary` опускается |
 
-Итоговое значение отображается в столбце **Reasoning effort** журнала запросов.
+Для преобразованных запросов полученный уровень отображается в столбце **Reasoning effort** журнала запросов.
+Управляемые нативные запросы Messages записывают включённый бюджет thinking как `budget:<tokens>`,
+если нет распознанного `output_config.effort`; запись в журнал не изменяет передаваемое тело запроса.
 
 ## Входящее преобразование (Messages → Responses)
 
@@ -663,3 +665,5 @@ Claude Code **2.1.257 or newer** is required for FORCE. Plugin and built-in agen
 The dashboard warns about old or unknown CLI versions, unavailable targets, and either variable already present in `settings.json` → `env` (which overrides launch env). Detection is read-only and server-local: it cannot inspect another launch shell, another machine, or project-local settings. An unknown result is not proof of force support.
 
 Explicit gateway selectors on a generated agent request take precedence over its legacy `ocx-route` fallback, even if the saved force setting changes after launch. For shell or settings overrides of generated roster agents, use an explicit gateway alias; bare Claude ids retain the older-client fallback behavior. Native aliases restore their bare model before the existing credential and model-map checks. Connected launches validate force targets against a fresh authenticated gateway catalog; failed discovery skips automatic force injection, and cached context windows alone never prove availability.
+
+Только до начала вывода: Если HTTP 401 содержит authentication_error (без error.code) с точным сообщением “OAuth access token has been revoked.”, отправившая запрос учётная запись OAuth помечается как требующая нового входа, а привязки сессий очищаются. До начала вывода возможен переход к доступной записи того же пула в пределах существующих лимитов отправки. Без замены возвращается исходный 401; запись исключается до нового входа. Обработка других 401 не меняется.

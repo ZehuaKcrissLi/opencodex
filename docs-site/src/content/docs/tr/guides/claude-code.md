@@ -697,7 +697,7 @@ olarak test edilmelidir.
 
 ## Akıl yürütme çabası (Reasoning effort)
 
-Claude Code'un `/effort` ayarı adaptör genelinde korunur:
+Messages → Responses olarak çevrilen isteklerde Claude Code'un `/effort` ayarı şöyle eşlenir:
 
 | Hat formatı | Eşleme |
 | --- | --- |
@@ -705,7 +705,9 @@ Claude Code'un `/effort` ayarı adaptör genelinde korunur:
 | `thinking.type: "enabled"` + `budget_tokens` | ≤4096→`low`, ≤16384→`medium`, üzeri→`high` |
 | `thinking.type: "disabled"` | `reasoning: { effort: "none" }`; özet atlanır |
 
-Çözümlenen değer, istek günlüğünün **Reasoning effort** sütununda görünür.
+Çevrilen isteklerde eşlenen seviye, istek günlüğünün **Reasoning effort** sütununda görünür.
+Yönetilen yerel Messages isteklerinde tanınan bir `output_config.effort` yoksa etkin düşünme bütçesi
+`budget:<tokens>` olarak kaydedilir; bu günlük kaydı gönderilen istek gövdesini değiştirmez.
 
 ## Gelen çeviri (Messages → Responses)
 
@@ -885,3 +887,5 @@ Claude Code **2.1.257 or newer** is required for FORCE. Plugin and built-in agen
 The dashboard warns about old or unknown CLI versions, unavailable targets, and either variable already present in `settings.json` → `env` (which overrides launch env). Detection is read-only and server-local: it cannot inspect another launch shell, another machine, or project-local settings. An unknown result is not proof of force support.
 
 Explicit gateway selectors on a generated agent request take precedence over its legacy `ocx-route` fallback, even if the saved force setting changes after launch. For shell or settings overrides of generated roster agents, use an explicit gateway alias; bare Claude ids retain the older-client fallback behavior. Native aliases restore their bare model before the existing credential and model-map checks. Connected launches validate force targets against a fresh authenticated gateway catalog; failed discovery skips automatic force injection, and cached context windows alone never prove availability.
+
+Yalnızca çıktı başlamadan önce: HTTP 401 authentication_error (error.code olmadan) iletisi tam olarak “OAuth access token has been revoked.” olduğunda, isteği gönderen OAuth hesabı yeniden oturum açılması gereken durumda işaretlenir ve oturum bağları temizlenir. Çıktı başlamadan önce mevcut gönderim sınırları içinde aynı havuzdaki uygun hesaba geçilebilir. Alternatif yoksa özgün 401 döndürülür; hesap yeniden giriş yapılana kadar seçim dışı kalır. Diğer 401 yanıtlarının işlenmesi değişmez.
