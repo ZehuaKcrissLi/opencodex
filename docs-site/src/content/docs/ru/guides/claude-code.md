@@ -330,8 +330,10 @@ Anthropic сохраняют канонические id в обоих инте�
 
 ### Маркер контекстного варианта `[1m]`
 
-Модели с подтверждённым контекстным окном 1M (или, при автоконтексте, больше 200k и не ниже
-порога сжатия) получают дополнительную строку `…[1m]` в селекторе. Её выбор заставляет Claude Code
+Модели с подтверждённым контекстным окном 1M или не ниже порога сжатия по умолчанию (829 800)
+получают дополнительную строку `…[1m]` в селекторе. Этот порог фиксирован: изменение значения сжатия его
+не понижает, а модель Claude на маршруте Anthropic должна действительно иметь 1M. Без автоконтекста учитываются
+только окна 1M. При выходе за реальное окно приходит ошибка `prompt is too long`, и Claude Code сам сжимает контекст. Её выбор заставляет Claude Code
 учитывать полный контекст 1M. Прокси удаляет суффикс `[1m]` (без учёта регистра) до разрешения
 алиасов и маршрутизации.
 
@@ -340,8 +342,9 @@ Anthropic сохраняют канонические id в обоих инте�
 Для любой незнакомой модели Claude Code считает контекст равным 200k токенов. **Автоконтекст**
 (включён по умолчанию) исправляет это:
 
-1. Модели, чьё реальное окно больше 200k **и** не меньше порога автосжатия, получают маркер
-   `[1m]` в строках селектора и слотах окружения.
+1. Слоты окружения при запуске получают маркер `[1m]`, когда реальное окно больше 200k **и** не меньше
+   настроенного порога автосжатия. Строки обнаружения и селектора Desktop этому порогу не следуют:
+   для них действует фиксированный пол 829 800 токенов (настоящий 1M для моделей Claude на маршруте Anthropic).
 2. Внедряется `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (по умолчанию `829800`, диапазон
    `100000`–`1000000`), чтобы в этой точке диалог автоматически резюмировался.
 
@@ -355,10 +358,24 @@ Anthropic сохраняют канонические id в обоих инте�
 реального окна модели, эта модель ломается — чат завершится ошибкой раньше, чем успеет сработать
 резюмирование.
 
-Нативные модели Anthropic с окном меньше 1M никогда не помечаются автоматически. Экспортированные
-вами значения всегда имеют приоритет (прокси использует ВАШЕ значение, чтобы решить, какие модели
-можно безопасно пометить). Некорректные значения, внесённые в конфигурацию вручную, откатываются
+Нативные модели Anthropic с окном меньше 1M никогда не помечаются автоматически. Экспортированное
+вами окно сжатия имеет приоритет при пометке слотов запуска (прокси использует ВАШЕ значение, чтобы решить, какие модели
+можно безопасно пометить). Строки обнаружения игнорируют этот экспорт и сохраняют фиксированный пол. Некорректные значения, внесённые в конфигурацию вручную, откатываются
 к 829,800.
+
+### Учёт контекста (1M по умолчанию, 200k по выбору)
+
+`claudeCode.contextAccounting` определяет, что opencodex выбирает по умолчанию. Без значения (`1m`, по умолчанию) модели
+с длинным окном предлагаются как 1M в слотах окружения запуска, селекторах Desktop, Desktop 3P (`prefer1m`) и созданных
+субагентах. Значение `200k` это отключает: маркер `[1m]` автоматически не ставится, `CLAUDE_CODE_AUTO_COMPACT_WINDOW` не
+передаётся, а Desktop 3P убирает `prefer1m`, оставляя `supports1m`. Селектор, который вы сами пометили `[1m]`, остаётся
+доступным (созданные и принудительные субагенты по-прежнему снимают маркер, который окно модели не выдерживает), а в списке
+обнаружения остаются строки `· 1M` для моделей с настоящим окном 1M. `200k` важнее автоконтекста: экспортированное вами
+значение сжатия не включает автоматическую разметку снова, но opencodex ваш экспорт не трогает.
+
+```bash
+ocx claude config set --context-accounting 200k
+```
 
 ### Эффективное окружение моделей
 
@@ -637,7 +654,7 @@ Responses `web_search_call` в парные блоки Anthropic `server_tool_us
 
 **Потолок контекста 200k, хотя модель больше** — выберите в селекторе вариант `[1m]` или
 включите автоконтекст (включён по умолчанию). Если строки `[1m]` в селекторе нет, подтверждённое
-контекстное окно модели может быть меньше порога автосжатия.
+контекстное окно модели может быть меньше фиксированного пола в 829 800 токенов.
 
 **Большой расход токенов при загрузке скиллов** — встроенный скилл `claude-api` (~136k токенов)
 автоматически загружается при упоминании моделей Claude. Для нативного проброса это нормально;
@@ -658,7 +675,7 @@ The Subagents page offers **Force all subagents onto one model**, off by default
 
 `ocx agent subagents force combo/tev-auto` sets `claudeCode.subagentModelForce`; `ocx agent subagents force -` clears it. `ocx agent status` reports the setting. `GET /api/subagent-models` returns `force`, `forceAvailable`, and `forceStatus`; `PUT` accepts `{ "force": "combo/tev-auto" }` or `{ "force": null }` without changing the roster. Omitting `force` leaves it unchanged. Invalid or unexposed targets are rejected on write; stale targets are reported and skipped at launch.
 
-This takes effect on the **next routed `ocx claude` launch**, injecting `CLAUDE_CODE_SUBAGENT_MODEL` as an explicit proxy alias (with `[1m]` only for an authoritative million-token window; native Claude targets use a reversible native alias) and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. Each nonempty shell-exported variable independently wins. Native launches inject neither variable; plain `claude` is not affected. No plugin files or `settings.json` are modified by this setting.
+This takes effect on the **next routed `ocx claude` launch**, injecting `CLAUDE_CODE_SUBAGENT_MODEL` as an explicit proxy alias (with `[1m]` when the authoritative window reaches the fixed 829,800-token floor, and only for a genuine 1M window on Anthropic Claude models and bare `claude-*` selectors; native Claude targets use a reversible native alias) and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. Each nonempty shell-exported variable independently wins. Native launches inject neither variable; plain `claude` is not affected. No plugin files or `settings.json` are modified by this setting.
 
 Claude Code **2.1.257 or newer** is required for FORCE. Plugin and built-in agents (including Explore/Plan) and per-call model arguments are overridden. Forks and subagent skills with `model: inherit` keep the main conversation model. The main loop and Haiku/small-fast sidecars are unaffected. Existing roster files remain available.
 
